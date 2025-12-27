@@ -154,11 +154,45 @@ channels:
     severity: [critical, high]
 ```
 
+## Example PRDs for Testing
+
+Test the skill with these pre-built PRDs in the `examples/` directory:
+
+| PRD | Complexity | Time | Description |
+|-----|------------|------|-------------|
+| `simple-todo-app.md` | Low | ~10 min | Basic todo app - tests core functionality |
+| `api-only.md` | Low | ~10 min | REST API only - tests backend agents |
+| `static-landing-page.md` | Low | ~5 min | HTML/CSS only - tests frontend/marketing |
+| `full-stack-demo.md` | Medium | ~30-60 min | Complete bookmark manager - full test |
+
+```bash
+# Example: Test with simple todo app
+claude --dangerously-skip-permissions
+> Loki Mode with PRD at examples/simple-todo-app.md
+```
+
+## Running Tests
+
+The skill includes a comprehensive test suite:
+
+```bash
+# Run all tests
+./tests/run-all-tests.sh
+
+# Run individual test suites
+./tests/test-bootstrap.sh        # Directory structure, state init
+./tests/test-task-queue.sh       # Queue operations, priorities
+./tests/test-circuit-breaker.sh  # Failure handling, recovery
+./tests/test-agent-timeout.sh    # Timeout, stuck process handling
+./tests/test-state-recovery.sh   # Checkpoints, recovery
+```
+
 ## Requirements
 
 - Claude Code with `--dangerously-skip-permissions` flag
 - Internet access for competitive research and deployment
 - Cloud provider credentials (for deployment phase)
+- Python 3 (for test suite)
 
 ## Comparison
 

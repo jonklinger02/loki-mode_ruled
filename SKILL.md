@@ -1023,6 +1023,164 @@ Questions (logged in LOKI-LOG.md):
 4. Is there a simpler way?
 5. What would an expert challenge?
 
+## Timeout and Stuck Agent Handling
+
+### Task Timeout Configuration
+Different task types have different timeout limits:
+
+```yaml
+# .loki/config/timeouts.yaml
+defaults:
+  task: 300          # 5 minutes for general tasks
+
+overrides:
+  build:
+    timeout: 600     # 10 minutes for builds (npm build, webpack, etc.)
+    retryIncrease: 1.25  # Increase by 25% on retry
+  test:
+    timeout: 900     # 15 minutes for test suites
+    retryIncrease: 1.5
+  deploy:
+    timeout: 1800    # 30 minutes for deployments
+    retryIncrease: 1.0   # Don't increase
+  quick:
+    timeout: 60      # 1 minute for simple tasks
+    retryIncrease: 1.0
+```
+
+### Command Execution with Timeout
+All bash commands are wrapped with timeout to prevent stuck processes:
+
+```bash
+# Standard command execution pattern
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  local cmd="$@"
+
+  # Use timeout command (GNU coreutils)
+  if timeout "$timeout_seconds" bash -c "$cmd"; then
+    return 0
+  else
+    local exit_code=$?
+    if [ $exit_code -eq 124 ]; then
+      echo "TIMEOUT: Command exceeded ${timeout_seconds}s"
+      return 124
+    fi
+    return $exit_code
+  fi
+}
+
+# Example: npm build with 10 minute timeout
+run_with_timeout 600 "npm run build"
+```
+
+### Stuck Agent Detection (Heartbeat)
+Agents must send heartbeats to indicate they're still alive:
+
+```python
+HEARTBEAT_INTERVAL = 60     # Send every 60 seconds
+HEARTBEAT_TIMEOUT = 300     # Consider dead after 5 minutes
+
+def check_agent_health(agent_state):
+    if not agent_state.get('lastHeartbeat'):
+        return 'unknown'
+
+    last_hb = datetime.fromisoformat(agent_state['lastHeartbeat'])
+    age = (datetime.utcnow() - last_hb).total_seconds()
+
+    if age > HEARTBEAT_TIMEOUT:
+        return 'stuck'
+    elif age > HEARTBEAT_INTERVAL * 2:
+        return 'unresponsive'
+    else:
+        return 'healthy'
+```
+
+### Stuck Process Recovery
+When an agent is detected as stuck:
+
+```python
+def handle_stuck_agent(agent_id):
+    # 1. Mark agent as failed
+    update_agent_status(agent_id, 'failed')
+
+    # 2. Release claimed task back to queue
+    task = get_current_task(agent_id)
+    if task:
+        task['claimedBy'] = None
+        task['claimedAt'] = None
+        task['lastError'] = f'Agent {agent_id} became unresponsive'
+        task['retries'] += 1
+
+        # Increase timeout for retry
+        timeout_config = get_timeout_config(task['type'])
+        task['timeout'] = int(task['timeout'] * timeout_config.get('retryIncrease', 1.25))
+
+        move_task(task, 'in-progress', 'pending')
+
+    # 3. Increment circuit breaker failure count
+    increment_circuit_breaker(agent_role(agent_id))
+
+    # 4. Log incident
+    log_incident(f'Agent {agent_id} stuck, task requeued')
+```
+
+### Watchdog Pattern
+Each subagent implements a watchdog that must be "pet" regularly:
+
+```python
+class AgentWatchdog:
+    def __init__(self, timeout_seconds):
+        self.timeout = timeout_seconds
+        self.last_pet = datetime.utcnow()
+
+    def pet(self):
+        """Call this during long operations to prevent timeout"""
+        self.last_pet = datetime.utcnow()
+        self.update_heartbeat()
+
+    def is_expired(self):
+        age = (datetime.utcnow() - self.last_pet).total_seconds()
+        return age > self.timeout
+
+    def update_heartbeat(self):
+        # Write to agent state file
+        state_file = f'.loki/state/agents/{self.agent_id}.json'
+        with open(state_file, 'r+') as f:
+            state = json.load(f)
+            state['lastHeartbeat'] = datetime.utcnow().isoformat() + 'Z'
+            f.seek(0)
+            json.dump(state, f)
+            f.truncate()
+```
+
+### Graceful Termination
+When terminating an agent, use graceful shutdown:
+
+```bash
+terminate_agent() {
+  local pid="$1"
+  local grace_period=30  # seconds
+
+  # 1. Send SIGTERM for graceful shutdown
+  kill -TERM "$pid" 2>/dev/null || return 0
+
+  # 2. Wait for graceful exit
+  for i in $(seq 1 $grace_period); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "Agent terminated gracefully"
+      return 0
+    fi
+    sleep 1
+  done
+
+  # 3. Force kill if still running
+  echo "Force killing agent after ${grace_period}s"
+  kill -9 "$pid" 2>/dev/null || true
+}
+```
+
 ## Rate Limit Handling
 
 ### Distributed State Recovery
