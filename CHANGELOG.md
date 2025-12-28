@@ -12,16 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parses JSON stream in real-time to display text, tool calls, and results
   - Shows `[Tool: name]` when Claude uses a tool
   - Shows `[Session complete]` when done
-- **Vibe Kanban Dashboard** - Integrated visual task board (enabled by default)
-  - Auto-starts Vibe Kanban web UI at `http://127.0.0.1:57374`
-  - Tasks sync every 5 seconds from Loki queues to Kanban board
-  - Disable with `LOKI_VIBE_KANBAN=false`
-  - Configure port with `LOKI_KANBAN_PORT=<port>`
+- **Web Dashboard** - Visual task board with Anthropic design language
+  - Cream/beige background with coral (#D97757) accents matching Anthropic branding
+  - Auto-starts at `http://127.0.0.1:57374` and opens in browser
+  - Shows task counts and Kanban-style columns (Pending, In Progress, Completed, Failed)
+  - Auto-refreshes every 3 seconds
+  - Disable with `LOKI_DASHBOARD=false`
+  - Configure port with `LOKI_DASHBOARD_PORT=<port>`
 
 ### Changed
 - Replaced `--print` mode with `--output-format stream-json --verbose` for proper streaming
 - Python-based JSON parser extracts and displays Claude's responses in real-time
-- Kanban sync runs in background alongside status monitor
+- Simple HTML dashboard replaces Vibe Kanban (no external dependencies)
 
 ### Fixed
 - Live output now actually streams (was buffered until completion in 2.4.0)

@@ -13,8 +13,8 @@
 #   LOKI_BASE_WAIT      - Base wait time in seconds (default: 60)
 #   LOKI_MAX_WAIT       - Max wait time in seconds (default: 3600)
 #   LOKI_SKIP_PREREQS   - Skip prerequisite checks (default: false)
-#   LOKI_VIBE_KANBAN    - Enable Vibe Kanban UI (default: true)
-#   LOKI_KANBAN_PORT    - Vibe Kanban port (default: 57374)
+#   LOKI_DASHBOARD      - Enable web dashboard (default: true)
+#   LOKI_DASHBOARD_PORT - Dashboard port (default: 57374)
 #===============================================================================
 
 set -uo pipefail
@@ -27,11 +27,10 @@ MAX_RETRIES=${LOKI_MAX_RETRIES:-50}
 BASE_WAIT=${LOKI_BASE_WAIT:-60}
 MAX_WAIT=${LOKI_MAX_WAIT:-3600}
 SKIP_PREREQS=${LOKI_SKIP_PREREQS:-false}
-VIBE_KANBAN=${LOKI_VIBE_KANBAN:-true}
-KANBAN_PORT=${LOKI_KANBAN_PORT:-57374}
+ENABLE_DASHBOARD=${LOKI_DASHBOARD:-true}
+DASHBOARD_PORT=${LOKI_DASHBOARD_PORT:-57374}
 STATUS_MONITOR_PID=""
-KANBAN_PID=""
-KANBAN_SYNC_PID=""
+DASHBOARD_PID=""
 
 # Colors
 RED='\033[0;31m'
@@ -280,187 +279,306 @@ stop_status_monitor() {
 }
 
 #===============================================================================
-# Vibe Kanban Integration
+# Web Dashboard
 #===============================================================================
 
-export_tasks_to_kanban() {
-    # Export Loki tasks to Vibe Kanban format
-    local export_dir=".loki/kanban"
-    mkdir -p "$export_dir"
-
-    python3 -u << 'PYTHON_EXPORT'
-import json
-import os
-from datetime import datetime
-
-loki_dir = ".loki"
-export_dir = ".loki/kanban"
-
-def get_phase():
-    try:
-        with open(f"{loki_dir}/state/orchestrator.json") as f:
-            return json.load(f).get("currentPhase", "UNKNOWN")
-    except:
-        return "UNKNOWN"
-
-def export_queue(queue_file, status):
-    try:
-        with open(queue_file) as f:
-            content = f.read().strip()
-            if not content or content == "[]":
-                return []
-            tasks = json.loads(content)
-            if isinstance(tasks, dict):
-                tasks = tasks.get("tasks", [])
-    except:
-        return []
-
-    exported = []
-    phase = get_phase()
-
-    for task in tasks:
-        task_id = task.get("id", "unknown")
-        payload = task.get("payload", {})
-        agent_type = task.get("type", "general")
-
-        # Map status
-        status_map = {
-            "pending": "todo",
-            "in-progress": "doing",
-            "completed": "done",
-            "failed": "blocked",
-            "dead-letter": "blocked"
+generate_dashboard() {
+    # Generate HTML dashboard with Anthropic design language
+    cat > .loki/dashboard/index.html << 'DASHBOARD_HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loki Mode Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Söhne', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #FAF9F6;
+            color: #1A1A1A;
+            padding: 24px;
+            min-height: 100vh;
         }
-        vibe_status = status_map.get(status, "todo")
-
-        # Build title
-        action = payload.get("action", "") if isinstance(payload, dict) else ""
-        title = f"[{agent_type}] {action}" if action else f"[{agent_type}] Task"
-
-        # Build description
-        if isinstance(payload, dict):
-            desc = payload.get("description", json.dumps(payload, indent=2))
-        else:
-            desc = str(payload)
-
-        vibe_task = {
-            "id": f"loki-{task_id}",
-            "title": title[:80],
-            "description": desc[:500],
-            "status": vibe_status,
-            "agent": task.get("claimedBy", "unassigned"),
-            "tags": [agent_type, f"phase-{phase.lower()}", f"priority-{task.get('priority', 5)}"],
-            "createdAt": task.get("createdAt", datetime.utcnow().isoformat() + "Z"),
-            "metadata": {
-                "lokiId": task_id,
-                "lokiPhase": phase,
-                "retries": task.get("retries", 0),
-                "lastError": task.get("lastError")
-            }
+        .header {
+            text-align: center;
+            padding: 32px 20px;
+            margin-bottom: 32px;
         }
-
-        # Write individual task file
-        with open(f"{export_dir}/{task_id}.json", "w") as out:
-            json.dump(vibe_task, out, indent=2)
-        exported.append(task_id)
-
-    return exported
-
-# Export all queues
-all_exported = []
-for queue in ["pending", "in-progress", "completed", "failed", "dead-letter"]:
-    queue_file = f"{loki_dir}/queue/{queue}.json"
-    if os.path.exists(queue_file):
-        all_exported.extend(export_queue(queue_file, queue))
-
-# Write summary
-summary = {
-    "exportedAt": datetime.utcnow().isoformat() + "Z",
-    "phase": get_phase(),
-    "taskCount": len(all_exported),
-    "tasks": all_exported
+        .header h1 {
+            color: #D97757;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            color: #666;
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .header .phase {
+            display: inline-block;
+            margin-top: 16px;
+            padding: 8px 16px;
+            background: #FFF;
+            border: 1px solid #E5E3DE;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #1A1A1A;
+            font-weight: 500;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+        .stat {
+            background: #FFF;
+            border: 1px solid #E5E3DE;
+            border-radius: 12px;
+            padding: 20px 32px;
+            text-align: center;
+            min-width: 140px;
+            transition: box-shadow 0.2s ease;
+        }
+        .stat:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+        .stat .number { font-size: 36px; font-weight: 600; margin-bottom: 4px; }
+        .stat .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat.pending .number { color: #D97757; }
+        .stat.progress .number { color: #5B8DEF; }
+        .stat.completed .number { color: #2E9E6E; }
+        .stat.failed .number { color: #D44F4F; }
+        .columns {
+            display: flex;
+            gap: 20px;
+            overflow-x: auto;
+            padding-bottom: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .column {
+            flex: 1;
+            min-width: 300px;
+            max-width: 350px;
+            background: #FFF;
+            border: 1px solid #E5E3DE;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .column h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .column h2 .count {
+            background: #F0EFEA;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            color: #1A1A1A;
+        }
+        .column.pending h2 .count { background: #FCEEE8; color: #D97757; }
+        .column.progress h2 .count { background: #E8F0FD; color: #5B8DEF; }
+        .column.completed h2 .count { background: #E6F5EE; color: #2E9E6E; }
+        .column.failed h2 .count { background: #FCE8E8; color: #D44F4F; }
+        .task {
+            background: #FAF9F6;
+            border: 1px solid #E5E3DE;
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 12px;
+            transition: border-color 0.2s ease;
+        }
+        .task:hover { border-color: #D97757; }
+        .task .id { font-size: 10px; color: #999; margin-bottom: 6px; font-family: monospace; }
+        .task .type {
+            display: inline-block;
+            background: #FCEEE8;
+            color: #D97757;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .task .title { font-size: 13px; color: #1A1A1A; line-height: 1.5; }
+        .task .error {
+            font-size: 11px;
+            color: #D44F4F;
+            margin-top: 10px;
+            padding: 10px;
+            background: #FCE8E8;
+            border-radius: 6px;
+            font-family: monospace;
+        }
+        .refresh {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #D97757;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s ease;
+            box-shadow: 0 4px 12px rgba(217, 119, 87, 0.3);
+        }
+        .refresh:hover { background: #C56747; }
+        .updated {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 24px;
+        }
+        .empty {
+            color: #999;
+            font-size: 13px;
+            text-align: center;
+            padding: 24px;
+            font-style: italic;
+        }
+        .powered-by {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 24px;
+            border-top: 1px solid #E5E3DE;
+            color: #999;
+            font-size: 12px;
+        }
+        .powered-by span { color: #D97757; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>LOKI MODE</h1>
+        <div class="subtitle">Autonomous Multi-Agent Startup System</div>
+        <div class="phase" id="phase">Loading...</div>
+    </div>
+    <div class="stats">
+        <div class="stat pending"><div class="number" id="pending-count">-</div><div class="label">Pending</div></div>
+        <div class="stat progress"><div class="number" id="progress-count">-</div><div class="label">In Progress</div></div>
+        <div class="stat completed"><div class="number" id="completed-count">-</div><div class="label">Completed</div></div>
+        <div class="stat failed"><div class="number" id="failed-count">-</div><div class="label">Failed</div></div>
+    </div>
+    <div class="columns">
+        <div class="column pending"><h2>Pending <span class="count" id="pending-badge">0</span></h2><div id="pending-tasks"></div></div>
+        <div class="column progress"><h2>In Progress <span class="count" id="progress-badge">0</span></h2><div id="progress-tasks"></div></div>
+        <div class="column completed"><h2>Completed <span class="count" id="completed-badge">0</span></h2><div id="completed-tasks"></div></div>
+        <div class="column failed"><h2>Failed <span class="count" id="failed-badge">0</span></h2><div id="failed-tasks"></div></div>
+    </div>
+    <div class="updated" id="updated">Last updated: -</div>
+    <div class="powered-by">Powered by <span>Claude</span></div>
+    <button class="refresh" onclick="loadData()">Refresh</button>
+    <script>
+        async function loadJSON(path) {
+            try {
+                const res = await fetch(path + '?t=' + Date.now());
+                if (!res.ok) return [];
+                const text = await res.text();
+                if (!text.trim()) return [];
+                const data = JSON.parse(text);
+                return Array.isArray(data) ? data : (data.tasks || []);
+            } catch { return []; }
+        }
+        function renderTask(task) {
+            const payload = task.payload || {};
+            const title = payload.description || payload.action || task.type || 'Task';
+            const error = task.lastError ? `<div class="error">${task.lastError}</div>` : '';
+            return `<div class="task"><div class="id">${task.id}</div><span class="type">${task.type || 'general'}</span><div class="title">${title}</div>${error}</div>`;
+        }
+        async function loadData() {
+            const [pending, progress, completed, failed] = await Promise.all([
+                loadJSON('../queue/pending.json'),
+                loadJSON('../queue/in-progress.json'),
+                loadJSON('../queue/completed.json'),
+                loadJSON('../queue/failed.json')
+            ]);
+            document.getElementById('pending-count').textContent = pending.length;
+            document.getElementById('progress-count').textContent = progress.length;
+            document.getElementById('completed-count').textContent = completed.length;
+            document.getElementById('failed-count').textContent = failed.length;
+            document.getElementById('pending-badge').textContent = pending.length;
+            document.getElementById('progress-badge').textContent = progress.length;
+            document.getElementById('completed-badge').textContent = completed.length;
+            document.getElementById('failed-badge').textContent = failed.length;
+            document.getElementById('pending-tasks').innerHTML = pending.length ? pending.map(renderTask).join('') : '<div class="empty">No pending tasks</div>';
+            document.getElementById('progress-tasks').innerHTML = progress.length ? progress.map(renderTask).join('') : '<div class="empty">No tasks in progress</div>';
+            document.getElementById('completed-tasks').innerHTML = completed.length ? completed.slice(-10).reverse().map(renderTask).join('') : '<div class="empty">No completed tasks</div>';
+            document.getElementById('failed-tasks').innerHTML = failed.length ? failed.map(renderTask).join('') : '<div class="empty">No failed tasks</div>';
+            try {
+                const state = await fetch('../state/orchestrator.json?t=' + Date.now()).then(r => r.json());
+                document.getElementById('phase').textContent = 'Phase: ' + (state.currentPhase || 'UNKNOWN');
+            } catch { document.getElementById('phase').textContent = 'Phase: UNKNOWN'; }
+            document.getElementById('updated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        }
+        loadData();
+        setInterval(loadData, 3000);
+    </script>
+</body>
+</html>
+DASHBOARD_HTML
 }
-with open(f"{export_dir}/_summary.json", "w") as f:
-    json.dump(summary, f, indent=2)
 
-print(f"EXPORTED:{len(all_exported)}")
-PYTHON_EXPORT
-}
+start_dashboard() {
+    log_header "Starting Loki Dashboard"
 
-start_kanban_server() {
-    log_header "Starting Vibe Kanban Dashboard"
+    # Create dashboard directory
+    mkdir -p .loki/dashboard
 
-    # Check if npx is available
-    if ! command -v npx &> /dev/null; then
-        log_warn "npx not found - Vibe Kanban UI disabled"
-        log_info "Install Node.js to enable: brew install node"
-        return 1
-    fi
+    # Generate HTML
+    generate_dashboard
 
     # Check if port is already in use
-    if lsof -i :$KANBAN_PORT &>/dev/null; then
-        log_info "Port $KANBAN_PORT already in use - Kanban may already be running"
-        log_info "Dashboard: ${CYAN}http://127.0.0.1:$KANBAN_PORT${NC}"
+    if lsof -i :$DASHBOARD_PORT &>/dev/null; then
+        log_info "Port $DASHBOARD_PORT already in use"
+        log_info "Dashboard: ${CYAN}http://127.0.0.1:$DASHBOARD_PORT${NC}"
         return 0
     fi
 
-    # Create kanban data directory
-    mkdir -p .loki/kanban
-
-    # Start Vibe Kanban in background
-    log_step "Launching Vibe Kanban server..."
-
-    # Try to start vibe-kanban
-    local kanban_log="$(pwd)/.loki/logs/kanban.log"
-    touch "$kanban_log"
+    # Start Python HTTP server
+    log_step "Starting dashboard server..."
     (
-        cd .loki/kanban
-        npx vibe-kanban --port $KANBAN_PORT 2>&1 | while read line; do
-            echo "[kanban] $line" >> "$kanban_log"
+        cd .loki/dashboard
+        python3 -m http.server $DASHBOARD_PORT --bind 127.0.0.1 2>&1 | while read line; do
+            echo "[dashboard] $line" >> ../logs/dashboard.log
         done
     ) &
-    KANBAN_PID=$!
+    DASHBOARD_PID=$!
 
-    # Wait for server to start
-    sleep 3
+    sleep 1
 
-    if kill -0 $KANBAN_PID 2>/dev/null; then
-        log_info "Vibe Kanban started (PID: $KANBAN_PID)"
-        log_info "Dashboard: ${CYAN}http://127.0.0.1:$KANBAN_PORT${NC}"
+    if kill -0 $DASHBOARD_PID 2>/dev/null; then
+        log_info "Dashboard started (PID: $DASHBOARD_PID)"
+        log_info "Dashboard: ${CYAN}http://127.0.0.1:$DASHBOARD_PORT${NC}"
+
+        # Open in browser (macOS)
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            open "http://127.0.0.1:$DASHBOARD_PORT" 2>/dev/null || true
+        fi
         return 0
     else
-        log_warn "Vibe Kanban failed to start - falling back to STATUS.txt"
-        KANBAN_PID=""
+        log_warn "Dashboard failed to start"
+        DASHBOARD_PID=""
         return 1
     fi
 }
 
-start_kanban_sync() {
-    log_step "Starting task sync..."
-
-    # Initial export
-    export_tasks_to_kanban
-
-    # Background sync loop
-    (
-        while true; do
-            sleep 5
-            export_tasks_to_kanban 2>/dev/null || true
-        done
-    ) &
-    KANBAN_SYNC_PID=$!
-
-    log_info "Task sync started (every 5s)"
-}
-
-stop_kanban() {
-    if [ -n "$KANBAN_SYNC_PID" ]; then
-        kill "$KANBAN_SYNC_PID" 2>/dev/null || true
-        wait "$KANBAN_SYNC_PID" 2>/dev/null || true
-    fi
-    if [ -n "$KANBAN_PID" ]; then
-        kill "$KANBAN_PID" 2>/dev/null || true
-        wait "$KANBAN_PID" 2>/dev/null || true
+stop_dashboard() {
+    if [ -n "$DASHBOARD_PID" ]; then
+        kill "$DASHBOARD_PID" 2>/dev/null || true
+        wait "$DASHBOARD_PID" 2>/dev/null || true
     fi
 }
 
@@ -740,7 +858,7 @@ if __name__ == "__main__":
 cleanup() {
     echo ""
     log_warn "Received interrupt signal"
-    stop_kanban
+    stop_dashboard
     stop_status_monitor
     save_state ${RETRY_COUNT:-0} "interrupted" 130
     log_info "State saved. Run again to resume."
@@ -793,13 +911,11 @@ main() {
     # Initialize .loki directory
     init_loki_dir
 
-    # Start Vibe Kanban dashboard (if enabled)
-    if [ "$VIBE_KANBAN" = "true" ]; then
-        if start_kanban_server; then
-            start_kanban_sync
-        fi
+    # Start web dashboard (if enabled)
+    if [ "$ENABLE_DASHBOARD" = "true" ]; then
+        start_dashboard
     else
-        log_info "Vibe Kanban disabled (LOKI_VIBE_KANBAN=false)"
+        log_info "Dashboard disabled (LOKI_DASHBOARD=false)"
     fi
 
     # Start status monitor (background updates to .loki/STATUS.txt)
@@ -810,7 +926,7 @@ main() {
     run_autonomous "$PRD_PATH" || result=$?
 
     # Cleanup
-    stop_kanban
+    stop_dashboard
     stop_status_monitor
 
     exit $result
