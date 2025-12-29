@@ -566,11 +566,11 @@ start_dashboard() {
     # Generate HTML
     generate_dashboard
 
-    # Check if port is already in use
+    # Kill any existing process on the dashboard port
     if lsof -i :$DASHBOARD_PORT &>/dev/null; then
-        log_info "Port $DASHBOARD_PORT already in use"
-        log_info "Dashboard: ${CYAN}http://127.0.0.1:$DASHBOARD_PORT${NC}"
-        return 0
+        log_step "Killing existing process on port $DASHBOARD_PORT..."
+        lsof -ti :$DASHBOARD_PORT | xargs kill -9 2>/dev/null || true
+        sleep 1
     fi
 
     # Start Python HTTP server
