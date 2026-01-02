@@ -37,6 +37,7 @@ Every iteration follows this cycle:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  REASON: What needs to be done next?                            │
+│  - READ .loki/CONTINUITY.md first (working memory)              │
 │  - Check current state in .loki/state/orchestrator.json         │
 │  - Review pending tasks in .loki/queue/pending.json             │
 │  - Identify highest priority unblocked task                     │
@@ -50,11 +51,76 @@ Every iteration follows this cycle:
 ├─────────────────────────────────────────────────────────────────┤
 │  REFLECT: Did it work? What next?                               │
 │  - Verify task success (tests pass, no errors)                  │
+│  - UPDATE .loki/CONTINUITY.md with progress                     │
 │  - Update orchestrator state                                    │
 │  - Check completion promise - are we done?                      │
 │  - If not done, loop back to REASON                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### CONTINUITY.md - Working Memory Protocol
+
+**CRITICAL:** You have a persistent working memory file at `.loki/CONTINUITY.md` that maintains state across all turns of execution.
+
+**AT THE START OF EVERY TURN:**
+1. Read `.loki/CONTINUITY.md` to orient yourself to the current state
+2. Reference it throughout your reasoning
+3. Never make decisions without checking CONTINUITY.md first
+
+**AT THE END OF EVERY TURN:**
+1. Update `.loki/CONTINUITY.md` with any important new information
+2. Record what was accomplished
+3. Note what needs to happen next
+4. Document any blockers or decisions made
+
+**CONTINUITY.md Template:**
+```markdown
+# Loki Mode Working Memory
+Last Updated: [ISO timestamp]
+Current Phase: [bootstrap|discovery|architecture|development|qa|deployment|growth]
+Current Iteration: [number]
+
+## Active Goal
+[What we're currently trying to accomplish - 1-2 sentences]
+
+## Current Task
+- ID: [task-id from queue]
+- Description: [what we're doing]
+- Status: [in-progress|blocked|reviewing]
+- Started: [timestamp]
+
+## Just Completed
+- [Most recent accomplishment with file:line references]
+- [Previous accomplishment]
+- [etc - last 5 items]
+
+## Next Actions (Priority Order)
+1. [Immediate next step]
+2. [Following step]
+3. [etc]
+
+## Active Blockers
+- [Any current blockers or waiting items]
+
+## Key Decisions This Session
+- [Decision]: [Rationale] - [timestamp]
+
+## Working Context
+[Any critical information needed for current work - API keys in use,
+architecture decisions, patterns being followed, etc.]
+
+## Files Currently Being Modified
+- [file path]: [what we're changing]
+```
+
+**Relationship to Other Memory Systems:**
+- `CONTINUITY.md` = Working memory (current session state, updated every turn)
+- `ledgers/` = Agent-specific state (checkpointed periodically)
+- `handoffs/` = Agent-to-agent transfers (on agent switch)
+- `learnings/` = Extracted patterns (on task completion)
+- `rules/` = Permanent validated patterns (promoted from learnings)
+
+**CONTINUITY.md is the PRIMARY source of truth for "what am I doing right now?"**
 
 ### Perpetual Improvement Loop
 
@@ -375,19 +441,30 @@ const hashPassword = async (password: string): Promise<string> => {
 ### Memory Directory Structure
 
 ```
-.loki/memory/
-├── ledgers/                    # Current state per agent
-│   ├── LEDGER-orchestrator.md
-│   ├── LEDGER-eng-backend-01.md
-│   └── LEDGER-eng-qa-01.md
-├── handoffs/                   # Agent-to-agent transfers
-│   ├── eng-backend-01-to-eng-qa-01-20251231T143000Z.md
-│   └── eng-qa-01-to-ops-deploy-01-20251231T160000Z.md
-├── learnings/                  # Extracted patterns
-│   ├── 2025-12-31-auth-implementation.md
-│   └── 2025-12-31-database-optimization.md
-└── index.sqlite                # FTS5 searchable index (optional)
+.loki/
+├── CONTINUITY.md               # WORKING MEMORY - read/update EVERY turn
+│                               # Primary source of "what am I doing now?"
+│
+└── memory/                     # PERSISTENT MEMORY - checkpointed periodically
+    ├── ledgers/                # Per-agent state (for context handoffs)
+    │   ├── LEDGER-orchestrator.md
+    │   ├── LEDGER-eng-backend-01.md
+    │   └── LEDGER-eng-qa-01.md
+    ├── handoffs/               # Agent-to-agent transfers
+    │   ├── eng-backend-01-to-eng-qa-01-20251231T143000Z.md
+    │   └── eng-qa-01-to-ops-deploy-01-20251231T160000Z.md
+    ├── learnings/              # Extracted patterns (on task completion)
+    │   ├── 2025-12-31-auth-implementation.md
+    │   └── 2025-12-31-database-optimization.md
+    └── index.sqlite            # FTS5 searchable index (optional)
 ```
+
+**Memory Hierarchy:**
+1. `CONTINUITY.md` - Active working memory (updated every turn)
+2. `ledgers/` - Agent checkpoint state (updated on major milestones)
+3. `handoffs/` - Transfer documents (created on agent switch)
+4. `learnings/` - Pattern extraction (created on task completion)
+5. `rules/` - Validated permanent patterns (promoted from learnings)
 
 ### Context-Aware Subagent Dispatch
 
@@ -481,18 +558,25 @@ def search_memory(query: str) -> List[str]:
 ### Context Continuity Protocol
 
 **On Session Start (Resume from wrapper):**
-1. Load orchestrator state from `.loki/state/orchestrator.json`
-2. Load relevant agent ledger from `.loki/memory/ledgers/`
-3. Check for pending handoffs in `.loki/memory/handoffs/`
-4. Search learnings for current task type
-5. Resume from last checkpoint
+1. **READ `.loki/CONTINUITY.md` FIRST** - This is your working memory
+2. Load orchestrator state from `.loki/state/orchestrator.json`
+3. Load relevant agent ledger from `.loki/memory/ledgers/`
+4. Check for pending handoffs in `.loki/memory/handoffs/`
+5. Search learnings for current task type
+6. Resume from last checkpoint
+
+**On Every Turn:**
+1. Read CONTINUITY.md at start of REASON phase
+2. Reference it during ACT phase
+3. Update CONTINUITY.md at end of REFLECT phase
 
 **On Session End (Before context clear):**
-1. Update current ledger with final state
-2. Create handoff if work passes to another agent
-3. Extract learnings if patterns discovered
-4. Update orchestrator state with checkpoint timestamp
-5. Signal wrapper that context can be cleared
+1. **Final update to `.loki/CONTINUITY.md`** with complete state
+2. Update current ledger with final state
+3. Create handoff if work passes to another agent
+4. Extract learnings if patterns discovered
+5. Update orchestrator state with checkpoint timestamp
+6. Signal wrapper that context can be cleared
 
 ## Codebase Analysis Mode (No PRD Provided)
 
@@ -927,6 +1011,7 @@ done
 
 ```
 .loki/
+├── CONTINUITY.md                # Working memory (read/update every turn)
 ├── state/
 │   ├── orchestrator.json       # Master state
 │   ├── agents/                  # Per-agent state files
@@ -989,6 +1074,43 @@ mkdir -p "$LOKI_ROOT"/{state/{agents,checkpoints,locks},queue,messages/{inbox,ou
 for f in pending in-progress completed failed dead-letter; do
   echo '{"tasks":[]}' > "$LOKI_ROOT/queue/$f.json"
 done
+
+# Initialize CONTINUITY.md (working memory)
+cat > "$LOKI_ROOT/CONTINUITY.md" << 'EOF'
+# Loki Mode Working Memory
+Last Updated: BOOTSTRAP
+Current Phase: bootstrap
+Current Iteration: 0
+
+## Active Goal
+Initialize Loki Mode system and begin autonomous execution.
+
+## Current Task
+- ID: bootstrap
+- Description: System initialization
+- Status: in-progress
+- Started: BOOTSTRAP
+
+## Just Completed
+- (none yet)
+
+## Next Actions (Priority Order)
+1. Complete bootstrap initialization
+2. Parse PRD and extract requirements
+3. Begin discovery phase
+
+## Active Blockers
+- (none)
+
+## Key Decisions This Session
+- (none yet)
+
+## Working Context
+System starting fresh. No prior context.
+
+## Files Currently Being Modified
+- .loki/CONTINUITY.md: initialization
+EOF
 
 # Initialize orchestrator state
 cat > "$LOKI_ROOT/state/orchestrator.json" << 'EOF'

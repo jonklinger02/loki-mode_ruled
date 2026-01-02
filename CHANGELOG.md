@@ -5,6 +5,40 @@ All notable changes to Loki Mode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-01-02
+
+### Added
+- **CONTINUITY.md Working Memory Protocol** - Inspired by OpenAI's persistent memory pattern:
+  - Single working memory file at `.loki/CONTINUITY.md`
+  - Read at START of every RAR (Reason-Act-Reflect) cycle
+  - Update at END of every RAR cycle
+  - Primary source of truth for "what am I doing right now?"
+
+- **Working Memory Template** includes:
+  - Active goal and current task tracking
+  - Just completed items (last 5)
+  - Next actions in priority order
+  - Active blockers
+  - Key decisions this session
+  - Working context and files being modified
+
+- **Memory Hierarchy Clarification**:
+  1. `CONTINUITY.md` - Active working memory (every turn)
+  2. `ledgers/` - Agent checkpoint state (on milestones)
+  3. `handoffs/` - Transfer documents (on agent switch)
+  4. `learnings/` - Pattern extraction (on task completion)
+  5. `rules/` - Permanent validated patterns
+
+### Changed
+- RAR cycle now explicitly reads CONTINUITY.md in REASON phase
+- RAR cycle now explicitly updates CONTINUITY.md in REFLECT phase
+- Bootstrap script creates initial CONTINUITY.md
+- Context Continuity Protocol updated to prioritize CONTINUITY.md
+- Directory structure updated to show CONTINUITY.md at root of `.loki/`
+
+### Philosophy
+CONTINUITY.md provides a simpler, more explicit "every turn" memory protocol that complements the existing sophisticated memory system. It ensures Claude always knows exactly what it's working on, what just happened, and what needs to happen next.
+
 ## [2.10.1] - 2026-01-01
 
 ### Fixed
