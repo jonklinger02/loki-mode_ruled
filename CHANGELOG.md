@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Philosophy
 Instead of "degrade gracefully through compression", Loki Mode now uses "reset cleanly with memory preservation" - ensuring perfect context continuity across unlimited iterations.
 
+### Fixed
+- **API Console Upload** - Added `loki-mode-api-X.X.X.zip` artifact for console.anthropic.com
+  - API requires SKILL.md inside a folder wrapper (`loki-mode/SKILL.md`)
+  - Claude.ai uses flat structure (`SKILL.md` at root)
+  - Updated release workflow to generate both formats
+
 ## [2.9.1] - 2025-12-31
 
 ### Fixed

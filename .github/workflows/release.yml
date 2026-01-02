@@ -41,7 +41,7 @@ jobs:
           mkdir -p release
 
           # ============================================
-          # Artifact 1: loki-mode.zip (for Claude.ai)
+          # Artifact 1: loki-mode.zip (for Claude.ai website)
           # SKILL.md at ROOT level for direct upload
           # ============================================
           mkdir -p release/skill-root
@@ -56,8 +56,20 @@ jobs:
           cp release/loki-mode-${{ steps.version.outputs.version }}.zip release/loki-mode-${{ steps.version.outputs.version }}.skill
 
           # ============================================
-          # Artifact 2: loki-mode-claude-code.zip
-          # For Claude Code: contains loki-mode/ folder
+          # Artifact 2: loki-mode-api.zip (for console.anthropic.com)
+          # SKILL.md inside loki-mode/ folder (API requires folder wrapper)
+          # ============================================
+          mkdir -p release/api-package/loki-mode
+          cp SKILL.md release/api-package/loki-mode/
+          cp -r references release/api-package/loki-mode/
+
+          cd release/api-package
+          zip -r ../loki-mode-api-${{ steps.version.outputs.version }}.zip loki-mode
+          cd ../..
+
+          # ============================================
+          # Artifact 3: loki-mode-claude-code.zip
+          # For Claude Code: full package with loki-mode/ folder
           # Extract to ~/.claude/skills/
           # ============================================
           mkdir -p release/loki-mode
@@ -106,6 +118,7 @@ jobs:
           files: |
             release/loki-mode-${{ steps.version.outputs.version }}.zip
             release/loki-mode-${{ steps.version.outputs.version }}.skill
+            release/loki-mode-api-${{ steps.version.outputs.version }}.zip
             release/loki-mode-claude-code-${{ steps.version.outputs.version }}.zip
             release/loki-mode-claude-code-${{ steps.version.outputs.version }}.tar.gz
           draft: false

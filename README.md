@@ -75,6 +75,15 @@ references/
 
 The zip has `SKILL.md` at the root level as Claude.ai expects.
 
+### For Anthropic API Console (console.anthropic.com)
+
+1. Go to [Releases](https://github.com/asklokesh/claudeskill-loki-mode/releases)
+2. Download `loki-mode-api-X.X.X.zip` (note: the `-api-` version)
+3. Go to **console.anthropic.com → Skills**
+4. Upload the zip file
+
+The API version has `SKILL.md` inside a `loki-mode/` folder as the API requires.
+
 ### For Claude Code (CLI)
 
 **Option A: Download from Releases**
