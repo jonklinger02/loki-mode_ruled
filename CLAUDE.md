@@ -41,9 +41,9 @@ benchmarks/                 # SWE-bench and HumanEval benchmarks
 Every iteration follows: **R**eason -> **A**ct -> **R**eflect -> **V**erify
 
 ### Model Selection
-- **Haiku**: Simple tasks (tests, docs, commands) - use extensively for parallelization
-- **Sonnet**: Standard implementation (default)
-- **Opus**: Complex tasks (architecture, security reviews)
+- **Opus**: Planning and architecture ONLY (system design, high-level decisions)
+- **Sonnet**: Development and functional testing (implementation, integration tests)
+- **Haiku**: Unit tests, monitoring, and simple tasks - use extensively for parallelization
 
 ### Quality Gates
 1. Static analysis (CodeQL, ESLint)

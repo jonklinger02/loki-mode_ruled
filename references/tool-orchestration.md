@@ -307,35 +307,45 @@ def classify_task_complexity(task):
 
 ```yaml
 # Agent allocation strategy
+# Model selection: Opus=planning, Sonnet=development, Haiku=unit tests/monitoring
 complexity_allocations:
   trivial:
     max_agents: 1
-    model: haiku
+    planning: null         # No planning needed
+    development: haiku
+    testing: haiku
     review: skip           # No review needed for trivial
     parallel: false
 
   simple:
     max_agents: 2
-    model: haiku
+    planning: null         # No planning needed
+    development: haiku
+    testing: haiku
     review: single         # One quick review
     parallel: false
 
   moderate:
     max_agents: 4
-    model: sonnet
+    planning: sonnet       # Sonnet for moderate planning
+    development: sonnet
+    testing: haiku         # Unit tests always haiku
     review: standard       # 3 parallel reviewers
     parallel: true
 
   complex:
     max_agents: 8
-    model: sonnet
+    planning: opus         # Opus ONLY for complex planning
+    development: sonnet    # Sonnet for implementation
+    testing: haiku         # Unit tests still haiku
     review: deep           # 3 reviewers + devil's advocate
     parallel: true
-    escalation: opus       # Can escalate to opus if stuck
 
   critical:
     max_agents: 12
-    model: opus
+    planning: opus         # Opus for critical planning
+    development: sonnet    # Sonnet for implementation
+    testing: sonnet        # Functional/E2E tests with sonnet
     review: exhaustive     # Multiple review rounds
     parallel: true
     human_checkpoint: true # Pause for human review

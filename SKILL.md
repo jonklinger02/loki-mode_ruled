@@ -18,7 +18,7 @@ description: Multi-agent autonomous startup system for Claude Code. Triggers on 
 3. **CHECK** `.loki/state/orchestrator.json` - Current phase/metrics
 4. **REVIEW** `.loki/queue/pending.json` - Next tasks
 5. **FOLLOW** RARV cycle: REASON, ACT, REFLECT, **VERIFY** (test your work!)
-6. **OPTIMIZE** Use Haiku for simple tasks (tests, docs, commands) - 10+ agents in parallel
+6. **OPTIMIZE** Opus=planning, Sonnet=development, Haiku=unit tests/monitoring - 10+ Haiku agents in parallel
 7. **TRACK** Efficiency metrics: tokens, time, agent count per task
 8. **CONSOLIDATE** After task: Update episodic memory, extract patterns to semantic memory
 
@@ -139,40 +139,58 @@ claude --dangerously-skip-permissions
 
 ## Model Selection Strategy
 
-**CRITICAL: Sonnet 4.5 is DEFAULT. Use Haiku for simple tasks to optimize speed/cost.**
+**CRITICAL: Use the right model for each task type. Opus is ONLY for planning/architecture.**
 
 | Model | Use For | Examples |
 |-------|---------|----------|
-| **Sonnet 4.5** | DEFAULT - All standard implementation | Feature implementation, API endpoints, bug fixes, integration tests |
-| **Haiku 4.5** | OPTIMIZATION - Simple/parallelizable | Unit tests, docs, bash commands, formatting, linting, file operations |
-| **Opus 4.5** | COMPLEX - Architecture & security | System design, security reviews, complex debugging, architecture decisions |
+| **Opus 4.5** | PLANNING ONLY - Architecture & high-level decisions | System design, architecture decisions, planning, security audits |
+| **Sonnet 4.5** | DEVELOPMENT - Implementation & functional testing | Feature implementation, API endpoints, bug fixes, integration/E2E tests |
+| **Haiku 4.5** | OPERATIONS - Simple tasks & monitoring | Unit tests, docs, bash commands, linting, monitoring, file operations |
 
 ### Task Tool Model Parameter
 ```python
-# Haiku for simple tasks (PREFER THIS for speed)
-Task(subagent_type="general-purpose", model="haiku", description="Run unit tests", prompt="...")
-
-# Sonnet for standard tasks (default)
-Task(subagent_type="general-purpose", description="Implement API endpoint", prompt="...")
-
-# Opus for complex tasks (use sparingly)
+# Opus for planning/architecture ONLY
 Task(subagent_type="Plan", model="opus", description="Design system architecture", prompt="...")
+
+# Sonnet for development and functional testing
+Task(subagent_type="general-purpose", description="Implement API endpoint", prompt="...")
+Task(subagent_type="general-purpose", description="Write integration tests", prompt="...")
+
+# Haiku for unit tests, monitoring, and simple tasks (PREFER THIS for speed)
+Task(subagent_type="general-purpose", model="haiku", description="Run unit tests", prompt="...")
+Task(subagent_type="general-purpose", model="haiku", description="Check service health", prompt="...")
 ```
 
-### Haiku Task Categories (Use Extensively)
+### Opus Task Categories (RESTRICTED - Planning Only)
+- System architecture design
+- High-level planning and strategy
+- Security audits and threat modeling
+- Major refactoring decisions
+- Technology selection
+
+### Sonnet Task Categories (Development)
+- Feature implementation
+- API endpoint development
+- Bug fixes (non-trivial)
+- Integration tests and E2E tests
+- Code refactoring
+- Database migrations
+
+### Haiku Task Categories (Operations - Use Extensively)
 - Writing/running unit tests
 - Generating documentation
 - Running bash commands (npm install, git operations)
 - Simple bug fixes (typos, imports, formatting)
 - File operations, linting, static analysis
+- Monitoring, health checks, log analysis
 - Simple data transformations, boilerplate generation
 
 ### Parallelization Strategy
 ```python
-# Launch 10+ Haiku agents in parallel for test suite
+# Launch 10+ Haiku agents in parallel for unit test suite
 for test_file in test_files:
     Task(subagent_type="general-purpose", model="haiku",
-         description=f"Run tests: {test_file}",
+         description=f"Run unit tests: {test_file}",
          run_in_background=True)
 ```
 
@@ -201,13 +219,13 @@ PREFERENCE REWARD: Inferred from user actions (commit/revert/edit)
 
 ### Dynamic Agent Selection by Complexity
 
-| Complexity | Max Agents | Model | Review |
-|------------|------------|-------|--------|
-| Trivial | 1 | haiku | skip |
-| Simple | 2 | haiku | single |
-| Moderate | 4 | sonnet | standard (3 parallel) |
-| Complex | 8 | sonnet | deep (+ devil's advocate) |
-| Critical | 12 | opus | exhaustive + human checkpoint |
+| Complexity | Max Agents | Planning | Development | Testing | Review |
+|------------|------------|----------|-------------|---------|--------|
+| Trivial | 1 | - | haiku | haiku | skip |
+| Simple | 2 | - | haiku | haiku | single |
+| Moderate | 4 | sonnet | sonnet | haiku | standard (3 parallel) |
+| Complex | 8 | opus | sonnet | haiku | deep (+ devil's advocate) |
+| Critical | 12 | opus | sonnet | sonnet | exhaustive + human checkpoint |
 
 See `references/tool-orchestration.md` for full implementation details.
 
