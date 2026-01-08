@@ -1061,12 +1061,14 @@ get_relevant_learnings() {
     fi
 
     # Simple grep-based relevance (can be enhanced with embeddings)
-    python3 << LEARNINGS_SCRIPT
+    # Pass context via environment variable to avoid quote escaping issues
+    export LOKI_CONTEXT="$context"
+    python3 << 'LEARNINGS_SCRIPT'
 import json
 import os
 
 learnings_dir = os.path.expanduser("~/.loki/learnings")
-context = "$context".lower()
+context = os.environ.get("LOKI_CONTEXT", "").lower()
 
 def load_jsonl(filepath):
     entries = []
@@ -1126,7 +1128,7 @@ extract_learnings_from_session() {
 import re
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 continuity_file = ".loki/CONTINUITY.md"
 learnings_dir = os.path.expanduser("~/.loki/learnings")
@@ -1145,7 +1147,7 @@ if mistakes_match:
     bullets = re.findall(r'[-*]\s+(.+)', mistakes_text)
     for bullet in bullets:
         entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "project": os.path.basename(os.getcwd()),
             "category": "session",
             "description": bullet.strip()
@@ -1595,7 +1597,7 @@ run_autonomous() {
 import sys
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ANSI colors
 CYAN = "\033[0;36m"
@@ -1610,7 +1612,7 @@ AGENTS_FILE = ".loki/state/agents.json"
 QUEUE_IN_PROGRESS = ".loki/queue/in-progress.json"
 active_agents = {}  # tool_id -> agent_info
 orchestrator_id = "orchestrator-main"
-session_start = datetime.utcnow().isoformat() + "Z"
+session_start = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 def init_orchestrator():
     """Initialize the main orchestrator agent (always visible)."""
@@ -1726,7 +1728,7 @@ def process_stream():
                                 "model": model,
                                 "current_task": description,
                                 "status": "active",
-                                "spawned_at": datetime.utcnow().isoformat() + "Z",
+                                "spawned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                                 "tasks_completed": []
                             }
                             active_agents[tool_id] = agent_info
@@ -1753,7 +1755,7 @@ def process_stream():
                         # Mark agent as completed if it was a Task
                         if tool_id in active_agents:
                             active_agents[tool_id]["status"] = "completed"
-                            active_agents[tool_id]["completed_at"] = datetime.utcnow().isoformat() + "Z"
+                            active_agents[tool_id]["completed_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                             save_agents()
                             print(f"{DIM}[Agent Complete]{NC} ", end="", flush=True)
                         else:
@@ -1761,7 +1763,7 @@ def process_stream():
 
             elif msg_type == "result":
                 # Session complete - mark all agents as completed
-                completed_at = datetime.utcnow().isoformat() + "Z"
+                completed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 for agent_id in active_agents:
                     if active_agents[agent_id].get("status") == "active":
                         active_agents[agent_id]["status"] = "completed"
