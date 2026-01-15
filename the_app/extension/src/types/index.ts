@@ -477,3 +477,24 @@ export interface CodeReviewIssue {
   /** Suggested fix */
   suggestion?: string;
 }
+
+// ============================================================================
+// UI Layer Types (re-exported from execution.ts)
+// ============================================================================
+
+// Re-export UI-specific types that use different conventions
+// These use lowercase string types for compatibility with VSCode TreeView
+export type {
+  RARVPhase as UIRARVPhase,
+  TaskStatus as UITaskStatus,
+  AgentType as UIAgentType,
+  Task as UITask,
+  TaskResult,
+  PlanStep as UIPlanStep,
+  Plan as UIPlan,
+  ActiveAgent,
+  QueueState,
+  CostState,
+  ExecutionState,
+  StateUpdateEvent
+} from './execution';
