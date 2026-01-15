@@ -2,7 +2,7 @@
  * Task queue for Autonomi VSCode Extension
  */
 
-import { Task, TaskPriority, TaskStatus } from '../types';
+import { Task, TaskStatus } from '../types/execution';
 
 export class TaskQueue {
   private queue: Task[] = [];
@@ -118,7 +118,7 @@ export class TaskQueue {
   /**
    * Get tasks by priority
    */
-  getByPriority(priority: TaskPriority): Task[] {
+  getByPriority(priority: number): Task[] {
     return this.queue.filter(t => t.priority === priority);
   }
 

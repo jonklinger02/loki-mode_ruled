@@ -1,9 +1,10 @@
 {
   "name": "autonomi",
   "displayName": "Autonomi - Autonomous Development",
-  "description": "Multi-agent autonomous software development platform",
+  "description": "Enterprise-ready autonomous software development platform for VSCode",
   "version": "0.1.0",
   "publisher": "autonomi",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -22,9 +23,63 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./dist/extension.js",
+  "main": "./out/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "autonomi.startTask",
+        "title": "Autonomi: Start Task",
+        "category": "Autonomi",
+        "icon": "$(play)"
+      },
+      {
+        "command": "autonomi.stopTask",
+        "title": "Autonomi: Stop Task",
+        "category": "Autonomi",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "autonomi.approvePlan",
+        "title": "Autonomi: Approve Plan",
+        "category": "Autonomi",
+        "icon": "$(check)"
+      },
+      {
+        "command": "autonomi.rejectPlan",
+        "title": "Autonomi: Reject Plan",
+        "category": "Autonomi",
+        "icon": "$(close)"
+      },
+      {
+        "command": "autonomi.showOutput",
+        "title": "Autonomi: Show Output",
+        "category": "Autonomi",
+        "icon": "$(output)"
+      },
+      {
+        "command": "autonomi.configureApiKeys",
+        "title": "Autonomi: Configure API Keys",
+        "category": "Autonomi",
+        "icon": "$(key)"
+      },
+      {
+        "command": "autonomi.showStatus",
+        "title": "Autonomi: Show Status",
+        "category": "Autonomi",
+        "icon": "$(info)"
+      },
+      {
+        "command": "autonomi.clearQueue",
+        "title": "Autonomi: Clear Queue",
+        "category": "Autonomi",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "autonomi.openSettings",
+        "title": "Autonomi: Open Settings",
+        "category": "Autonomi",
+        "icon": "$(gear)"
+      },
       {
         "command": "autonomi.start",
         "title": "Autonomi: Start Autonomous Development",
@@ -82,60 +137,203 @@
     "configuration": {
       "title": "Autonomi",
       "properties": {
-        "autonomi.apiKeys.anthropic": {
+        "autonomi.provider.preferred": {
           "type": "string",
-          "default": "",
-          "description": "Anthropic API key for Claude models",
-          "scope": "application"
+          "default": "anthropic",
+          "enum": ["anthropic", "openai", "google", "local"],
+          "description": "Preferred AI provider"
         },
-        "autonomi.apiKeys.openai": {
-          "type": "string",
-          "default": "",
-          "description": "OpenAI API key (optional fallback)",
-          "scope": "application"
+        "autonomi.provider.fallbacks": {
+          "type": "array",
+          "default": ["openai", "google"],
+          "items": {
+            "type": "string",
+            "enum": ["anthropic", "openai", "google", "local"]
+          },
+          "description": "Fallback providers in order of preference"
         },
-        "autonomi.budgets.sessionLimit": {
+        "autonomi.budgets.taskBudget": {
           "type": "number",
-          "default": 10.0,
-          "description": "Maximum cost per session in USD",
-          "scope": "resource"
+          "default": 5.00,
+          "minimum": 0,
+          "description": "Maximum budget per task in USD"
         },
-        "autonomi.budgets.taskLimit": {
+        "autonomi.budgets.sessionBudget": {
           "type": "number",
-          "default": 2.0,
-          "description": "Maximum cost per individual task in USD",
-          "scope": "resource"
+          "default": 50.00,
+          "minimum": 0,
+          "description": "Maximum budget per session in USD"
         },
-        "autonomi.budgets.dailyLimit": {
+        "autonomi.budgets.dailyBudget": {
           "type": "number",
-          "default": 50.0,
-          "description": "Maximum daily spending in USD",
-          "scope": "application"
+          "default": 100.00,
+          "minimum": 0,
+          "description": "Maximum daily budget in USD"
         },
-        "autonomi.approvalGates.requirePlanApproval": {
+        "autonomi.budgets.warningThreshold": {
+          "type": "number",
+          "default": 0.80,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Warning threshold as percentage of budget (0-1)"
+        },
+        "autonomi.approvalGates.productionDeploy": {
           "type": "boolean",
           "default": true,
-          "description": "Require manual approval before executing plans"
+          "description": "Require approval for production deployments"
         },
-        "autonomi.approvalGates.autoApproveTier1": {
+        "autonomi.approvalGates.databaseMigration": {
           "type": "boolean",
-          "default": false,
-          "description": "Auto-approve Tier 1 (high confidence) tasks"
+          "default": true,
+          "description": "Require approval for database migrations"
         },
-        "autonomi.approvalGates.autoApproveTier2": {
+        "autonomi.approvalGates.securityChanges": {
           "type": "boolean",
-          "default": false,
-          "description": "Auto-approve Tier 2 (medium-high confidence) tasks"
+          "default": true,
+          "description": "Require approval for security-related changes"
         },
-        "autonomi.approvalGates.fileChangeThreshold": {
-          "type": "number",
-          "default": 5,
-          "description": "Number of file changes that triggers mandatory approval"
+        "autonomi.approvalGates.newDependencies": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require approval for new dependencies"
+        },
+        "autonomi.approvalGates.fileDeletion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require approval for file deletions"
         },
         "autonomi.approvalGates.costThreshold": {
           "type": "number",
-          "default": 1.0,
-          "description": "Estimated cost in USD that triggers mandatory approval"
+          "default": 1.00,
+          "minimum": 0,
+          "description": "Cost threshold that triggers approval gate in USD"
+        },
+        "autonomi.autoApprove.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable auto-approval for high-confidence tasks"
+        },
+        "autonomi.autoApprove.confidenceThreshold": {
+          "type": "number",
+          "default": 0.90,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum confidence for auto-approval (0-1)"
+        },
+        "autonomi.agents.maxConcurrent": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Maximum concurrent agent instances"
+        },
+        "autonomi.confidence.tier1Threshold": {
+          "type": "number",
+          "default": 0.90,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence threshold for Tier 1 (simple tasks)"
+        },
+        "autonomi.confidence.tier2Threshold": {
+          "type": "number",
+          "default": 0.60,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence threshold for Tier 2 (standard tasks)"
+        },
+        "autonomi.confidence.tier3Threshold": {
+          "type": "number",
+          "default": 0.30,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence threshold for Tier 3 (complex tasks)"
+        },
+        "autonomi.memory.hotMaxSizeMB": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 200,
+          "description": "Maximum size of hot memory cache in MB"
+        },
+        "autonomi.memory.coldPath": {
+          "type": "string",
+          "default": ".autonomi/memory/memory.db",
+          "description": "Path to cold memory SQLite database"
+        },
+        "autonomi.snapshots.maxCount": {
+          "type": "number",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 100,
+          "description": "Maximum number of snapshots to retain"
+        },
+        "autonomi.snapshots.path": {
+          "type": "string",
+          "default": ".autonomi/snapshots",
+          "description": "Path to snapshot storage directory"
+        },
+        "autonomi.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable anonymous telemetry (opt-in)"
+        },
+        "autonomi.logging.level": {
+          "type": "string",
+          "default": "info",
+          "enum": ["debug", "info", "warn", "error"],
+          "description": "Logging verbosity level"
+        },
+        "autonomi.quality.staticAnalysis.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable static analysis quality gate"
+        },
+        "autonomi.quality.staticAnalysis.tiers": {
+          "type": "array",
+          "default": [1, 2, 3],
+          "items": {
+            "type": "number"
+          },
+          "description": "Tiers that run static analysis"
+        },
+        "autonomi.quality.automatedTests.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automated tests quality gate"
+        },
+        "autonomi.quality.automatedTests.tiers": {
+          "type": "array",
+          "default": [2, 3],
+          "items": {
+            "type": "number"
+          },
+          "description": "Tiers that run automated tests"
+        },
+        "autonomi.quality.codeReview.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable code review quality gate"
+        },
+        "autonomi.quality.codeReview.tiers": {
+          "type": "array",
+          "default": [3],
+          "items": {
+            "type": "number"
+          },
+          "description": "Tiers that run code review"
+        },
+        "autonomi.quality.securityScan.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable security scan quality gate"
+        },
+        "autonomi.quality.securityScan.tiers": {
+          "type": "array",
+          "default": [3],
+          "items": {
+            "type": "number"
+          },
+          "description": "Tiers that run security scan"
         },
         "autonomi.modelSelection.planning": {
           "type": "string",
@@ -167,21 +365,39 @@
       }
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "autonomi.startTask",
+          "when": "true"
+        },
+        {
+          "command": "autonomi.stopTask",
+          "when": "true"
+        },
+        {
+          "command": "autonomi.approvePlan",
+          "when": "true"
+        },
+        {
+          "command": "autonomi.rejectPlan",
+          "when": "true"
+        }
+      ],
       "view/title": [
         {
-          "command": "autonomi.start",
+          "command": "autonomi.startTask",
           "when": "view == autonomi-status",
           "group": "navigation"
         },
         {
-          "command": "autonomi.stop",
+          "command": "autonomi.stopTask",
           "when": "view == autonomi-status",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
-          "command": "autonomi.approve",
+          "command": "autonomi.approvePlan",
           "when": "view == autonomi-queue && viewItem == pendingTask",
           "group": "inline"
         }
@@ -189,25 +405,29 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
-    "compile": "webpack",
-    "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0"
+    "lint:fix": "eslint src --ext ts --fix",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
     "eslint": "^8.54.0",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.2",
-    "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4"
+    "typescript": "^5.3.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "uuid": "^9.0.1"
   }
 }

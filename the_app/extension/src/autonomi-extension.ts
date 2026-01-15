@@ -11,13 +11,13 @@ import { TaskQueue } from './utils/task-queue';
 import {
   ExecutionState,
   Task,
-  TaskStatus,
-  TaskPriority,
   Plan,
   RARVPhase,
-  ConfidenceTier,
-  AgentType
-} from './types';
+  AgentType,
+  TaskStatus,
+  PlanStep
+} from './types/execution';
+import { ConfidenceTier } from './providers/types';
 
 // Forward declarations for components to be implemented
 interface AgentOrchestrator {
@@ -65,17 +65,11 @@ interface StatusBarController {
   dispose(): void;
 }
 
-interface AutonomiOutputChannel {
-  appendLine(text: string): void;
-  show(): void;
-  dispose(): void;
-}
-
 /**
  * Main Autonomi Extension class
  */
 export class AutonomiExtension implements vscode.Disposable {
-  private context: vscode.ExtensionContext;
+  private readonly context: vscode.ExtensionContext;
   private stateManager: StateManager;
   private configManager: ConfigManager;
   private taskQueue: TaskQueue;
@@ -149,46 +143,16 @@ export class AutonomiExtension implements vscode.Disposable {
    * Register extension commands
    */
   private registerCommands(): void {
-    const commands: Array<{ id: string; handler: (...args: unknown[]) => unknown }> = [
-      {
-        id: 'autonomi.startTask',
-        handler: () => this.promptAndStartTask()
-      },
-      {
-        id: 'autonomi.stopTask',
-        handler: () => this.stopTask()
-      },
-      {
-        id: 'autonomi.approvePlan',
-        handler: (planId?: string) => this.approvePlan(planId)
-      },
-      {
-        id: 'autonomi.rejectPlan',
-        handler: (planId?: string) => this.rejectPlan(planId)
-      },
-      {
-        id: 'autonomi.showOutput',
-        handler: () => this.outputChannel.show()
-      },
-      {
-        id: 'autonomi.configureApiKeys',
-        handler: () => this.configureApiKeys()
-      },
-      {
-        id: 'autonomi.showStatus',
-        handler: () => this.showStatus()
-      },
-      {
-        id: 'autonomi.clearQueue',
-        handler: () => this.clearQueue()
-      },
-      {
-        id: 'autonomi.openSettings',
-        handler: () => vscode.commands.executeCommand(
-          'workbench.action.openSettings',
-          'autonomi'
-        )
-      }
+    const commands = [
+      { id: 'autonomi.startTask', handler: () => this.promptAndStartTask() },
+      { id: 'autonomi.stopTask', handler: () => this.stopTask() },
+      { id: 'autonomi.approvePlan', handler: () => this.approvePlan() },
+      { id: 'autonomi.rejectPlan', handler: () => this.rejectPlan() },
+      { id: 'autonomi.showOutput', handler: () => this.outputChannel.show() },
+      { id: 'autonomi.configureApiKeys', handler: () => this.configureApiKeys() },
+      { id: 'autonomi.showStatus', handler: () => this.showStatus() },
+      { id: 'autonomi.clearQueue', handler: () => this.clearQueue() },
+      { id: 'autonomi.openSettings', handler: () => vscode.commands.executeCommand('workbench.action.openSettings', 'autonomi') }
     ];
 
     for (const { id, handler } of commands) {
@@ -232,23 +196,24 @@ export class AutonomiExtension implements vscode.Disposable {
     if (!state.isRunning) {
       statusBarItem.text = '$(circuit-board) Autonomi: Ready';
       statusBarItem.backgroundColor = undefined;
-    } else if (state.pendingPlan && !state.pendingPlan.approvedAt) {
+    } else if (state.currentPlan && !state.currentPlan.approved) {
       statusBarItem.text = '$(question) Autonomi: Awaiting Approval';
       statusBarItem.backgroundColor = new vscode.ThemeColor(
         'statusBarItem.warningBackground'
       );
-    } else if (state.phase) {
+    } else if (state.phase && state.phase !== 'idle') {
       const phaseIcons: Record<RARVPhase, string> = {
-        [RARVPhase.REASON]: '$(lightbulb)',
-        [RARVPhase.ACT]: '$(play)',
-        [RARVPhase.REFLECT]: '$(mirror)',
-        [RARVPhase.VERIFY]: '$(check)'
+        'idle': '$(circle-outline)',
+        'reason': '$(lightbulb)',
+        'act': '$(play)',
+        'reflect': '$(mirror)',
+        'verify': '$(check)'
       };
       const icon = phaseIcons[state.phase] || '$(sync~spin)';
-      statusBarItem.text = `${icon} Autonomi: ${state.phase.toUpperCase()} | $${state.sessionCost.toFixed(2)}`;
+      statusBarItem.text = `${icon} Autonomi: ${state.phase.toUpperCase()} | $${state.cost.sessionCost.toFixed(2)}`;
       statusBarItem.backgroundColor = undefined;
     } else {
-      statusBarItem.text = `$(sync~spin) Autonomi: Running | $${state.sessionCost.toFixed(2)}`;
+      statusBarItem.text = `$(sync~spin) Autonomi: Running | $${state.cost.sessionCost.toFixed(2)}`;
       statusBarItem.backgroundColor = undefined;
     }
   }
@@ -309,11 +274,12 @@ export class AutonomiExtension implements vscode.Disposable {
   /**
    * Create a new task
    */
-  private createTask(description: string, priority: TaskPriority = TaskPriority.NORMAL): Task {
+  private createTask(description: string, priority: number = 1): Task {
     return {
       id: uuidv4(),
+      title: description.slice(0, 50),
       description,
-      status: TaskStatus.PENDING,
+      status: 'pending' as TaskStatus,
       priority,
       createdAt: Date.now()
     };
@@ -335,46 +301,43 @@ export class AutonomiExtension implements vscode.Disposable {
       Logger.info(`Task confidence: ${confidence.confidence.toFixed(2)} (Tier ${confidence.tier})`);
 
       // 2. Generate plan
-      this.stateManager.setPhase(RARVPhase.REASON);
+      this.stateManager.setPhase('reason');
       const plan = await this.generatePlan(task);
       Logger.info(`Plan generated: ${plan.id} with ${plan.steps.length} steps`);
 
       // 3. Request approval if needed
-      if (plan.requiresApproval) {
-        this.stateManager.setPendingPlan(plan);
-        task.status = TaskStatus.AWAITING_APPROVAL;
+      const autoApprove = this.configManager.isAutoApproveEnabled();
+      const threshold = this.configManager.getAutoApproveThreshold();
+      const requiresApproval = !autoApprove || confidence.confidence < threshold;
 
-        const autoApprove = this.configManager.isAutoApproveEnabled();
-        const threshold = this.configManager.getAutoApproveThreshold();
+      if (requiresApproval) {
+        this.stateManager.setCurrentPlan(plan);
+        task.status = 'pending';
 
-        if (autoApprove && confidence.confidence >= threshold) {
-          Logger.info(`Auto-approving plan (confidence ${confidence.confidence} >= ${threshold})`);
-          await this.approvePlan(plan.id);
-        } else {
-          vscode.window.showInformationMessage(
-            `Plan ready for review. Estimated cost: $${plan.totalEstimatedCost.toFixed(2)}`,
-            'Approve',
-            'Reject'
-          ).then(action => {
-            if (action === 'Approve') {
-              this.approvePlan(plan.id);
-            } else if (action === 'Reject') {
-              this.rejectPlan(plan.id);
-            }
-          });
-          return; // Wait for user action
-        }
+        vscode.window.showInformationMessage(
+          `Plan ready for review. Estimated cost: $${plan.totalEstimatedCost.toFixed(2)}`,
+          'Approve',
+          'Reject'
+        ).then(action => {
+          if (action === 'Approve') {
+            this.approvePlan();
+          } else if (action === 'Reject') {
+            this.rejectPlan();
+          }
+        });
+        return; // Wait for user action
       }
 
-      // 4. Execute RARV cycle
+      // 4. Execute RARV cycle (auto-approved)
+      plan.approved = true;
+      plan.approvedAt = Date.now();
       await this.executeRARVCycle(task, plan);
 
     } catch (error) {
       Logger.error('Task execution failed', error as Error);
-      task.status = TaskStatus.FAILED;
-      task.error = (error as Error).message;
-      this.stateManager.failTask(task, task.error);
-      vscode.window.showErrorMessage(`Task failed: ${task.error}`);
+      task.status = 'failed';
+      this.stateManager.failTask(task, (error as Error).message);
+      vscode.window.showErrorMessage(`Task failed: ${(error as Error).message}`);
     }
   }
 
@@ -430,69 +393,64 @@ export class AutonomiExtension implements vscode.Disposable {
   private async generatePlan(task: Task): Promise<Plan> {
     // Placeholder implementation
     // TODO: Implement actual plan generation using PlanGenerator
-    const approvalGates = this.configManager.getApprovalGates();
     const description = task.description.toLowerCase();
 
-    // Determine if approval is required based on gates
-    const triggeredGates: string[] = [];
-    if (approvalGates.productionDeploy && description.includes('deploy')) {
-      triggeredGates.push('productionDeploy');
+    // Determine agent type based on description
+    let primaryAgent: AgentType = 'backend';
+    if (description.includes('frontend') || description.includes('ui') || description.includes('css')) {
+      primaryAgent = 'frontend';
+    } else if (description.includes('database') || description.includes('sql')) {
+      primaryAgent = 'database';
+    } else if (description.includes('api') || description.includes('endpoint')) {
+      primaryAgent = 'api';
+    } else if (description.includes('test')) {
+      primaryAgent = 'qa';
     }
-    if (approvalGates.databaseMigration && description.includes('migration')) {
-      triggeredGates.push('databaseMigration');
-    }
-    if (approvalGates.securityChanges && description.includes('security')) {
-      triggeredGates.push('securityChanges');
-    }
-    if (approvalGates.fileDeletion && description.includes('delete')) {
-      triggeredGates.push('fileDeletion');
-    }
+
+    const steps: PlanStep[] = [
+      {
+        id: uuidv4(),
+        description: 'Analyze requirements and context',
+        agentType: 'architect',
+        estimatedTokens: 1000,
+        estimatedCost: 0.01,
+        estimatedDuration: 5000,
+        dependencies: [],
+        filesAffected: []
+      },
+      {
+        id: uuidv4(),
+        description: 'Implement changes',
+        agentType: primaryAgent,
+        estimatedTokens: 3000,
+        estimatedCost: 0.03,
+        estimatedDuration: 15000,
+        dependencies: [],
+        filesAffected: []
+      },
+      {
+        id: uuidv4(),
+        description: 'Run tests and verify',
+        agentType: 'qa',
+        estimatedTokens: 1000,
+        estimatedCost: 0.01,
+        estimatedDuration: 5000,
+        dependencies: [],
+        filesAffected: []
+      }
+    ];
 
     const plan: Plan = {
       id: uuidv4(),
       taskId: task.id,
-      description: `Plan for: ${task.description}`,
-      steps: [
-        {
-          id: uuidv4(),
-          order: 1,
-          description: 'Analyze requirements and context',
-          agentType: AgentType.ARCHITECT,
-          estimatedTokens: 1000,
-          estimatedCost: 0.01,
-          dependencies: [],
-          status: TaskStatus.PENDING
-        },
-        {
-          id: uuidv4(),
-          order: 2,
-          description: 'Implement changes',
-          agentType: task.description.toLowerCase().includes('frontend')
-            ? AgentType.FRONTEND
-            : AgentType.BACKEND,
-          estimatedTokens: 3000,
-          estimatedCost: 0.03,
-          dependencies: [],
-          status: TaskStatus.PENDING
-        },
-        {
-          id: uuidv4(),
-          order: 3,
-          description: 'Run tests and verify',
-          agentType: AgentType.QA,
-          estimatedTokens: 1000,
-          estimatedCost: 0.01,
-          dependencies: [],
-          status: TaskStatus.PENDING
-        }
-      ],
+      title: `Plan: ${task.title}`,
+      description: `Execution plan for: ${task.description}`,
+      steps,
       totalEstimatedTokens: 5000,
       totalEstimatedCost: 0.05,
-      confidence: task.confidence || 0.5,
-      confidenceTier: task.confidenceTier || ConfidenceTier.TIER_2,
-      requiresApproval: triggeredGates.length > 0 || !this.configManager.isAutoApproveEnabled(),
-      approvalGates: triggeredGates,
-      createdAt: Date.now()
+      totalEstimatedDuration: 25000,
+      createdAt: Date.now(),
+      approved: false
     };
 
     return plan;
@@ -502,44 +460,37 @@ export class AutonomiExtension implements vscode.Disposable {
    * Execute the RARV cycle for a task
    */
   private async executeRARVCycle(task: Task, plan: Plan): Promise<void> {
-    task.status = TaskStatus.IN_PROGRESS;
+    task.status = 'in_progress';
     task.startedAt = Date.now();
 
     // REASON phase
-    this.stateManager.setPhase(RARVPhase.REASON);
+    this.stateManager.setPhase('reason');
     Logger.info('REASON phase: Analyzing task...');
     await this.delay(500); // Placeholder
 
     // ACT phase
-    this.stateManager.setPhase(RARVPhase.ACT);
+    this.stateManager.setPhase('act');
     Logger.info('ACT phase: Executing plan...');
     for (const step of plan.steps) {
-      Logger.info(`Executing step ${step.order}: ${step.description}`);
-      step.status = TaskStatus.IN_PROGRESS;
+      Logger.info(`Executing step: ${step.description}`);
       await this.delay(500); // Placeholder
-      step.status = TaskStatus.COMPLETED;
     }
 
     // REFLECT phase
-    this.stateManager.setPhase(RARVPhase.REFLECT);
+    this.stateManager.setPhase('reflect');
     Logger.info('REFLECT phase: Analyzing results...');
     await this.delay(500); // Placeholder
 
     // VERIFY phase
-    this.stateManager.setPhase(RARVPhase.VERIFY);
+    this.stateManager.setPhase('verify');
     Logger.info('VERIFY phase: Running verification...');
     await this.delay(500); // Placeholder
 
     // Complete task
-    task.status = TaskStatus.COMPLETED;
+    task.status = 'completed';
     task.completedAt = Date.now();
-    task.cost = plan.totalEstimatedCost;
-    task.result = {
-      success: true,
-      summary: `Completed task: ${task.description}`
-    };
 
-    this.stateManager.updateCost(task.cost);
+    this.stateManager.updateCost(plan.totalEstimatedCost);
     this.stateManager.completeTask(task);
     this.stateManager.stopExecution();
 
@@ -575,7 +526,7 @@ export class AutonomiExtension implements vscode.Disposable {
     Logger.info('Stopping current task...');
 
     if (state.currentTask) {
-      state.currentTask.status = TaskStatus.CANCELLED;
+      state.currentTask.status = 'cancelled';
       this.stateManager.failTask(state.currentTask, 'Cancelled by user');
     }
 
@@ -586,16 +537,18 @@ export class AutonomiExtension implements vscode.Disposable {
   /**
    * Approve a pending plan
    */
-  async approvePlan(planId?: string): Promise<void> {
+  async approvePlan(): Promise<void> {
     const state = this.stateManager.getState();
-    const plan = state.pendingPlan;
+    const plan = state.currentPlan;
 
-    if (!plan || (planId && plan.id !== planId)) {
+    if (!plan) {
       vscode.window.showErrorMessage('No pending plan to approve');
       return;
     }
 
     Logger.info(`Plan approved: ${plan.id}`);
+    plan.approved = true;
+    plan.approvedAt = Date.now();
     this.stateManager.approvePlan();
 
     // Continue execution
@@ -608,11 +561,11 @@ export class AutonomiExtension implements vscode.Disposable {
   /**
    * Reject a pending plan
    */
-  async rejectPlan(planId?: string): Promise<void> {
+  async rejectPlan(): Promise<void> {
     const state = this.stateManager.getState();
-    const plan = state.pendingPlan;
+    const plan = state.currentPlan;
 
-    if (!plan || (planId && plan.id !== planId)) {
+    if (!plan) {
       vscode.window.showErrorMessage('No pending plan to reject');
       return;
     }
@@ -622,7 +575,7 @@ export class AutonomiExtension implements vscode.Disposable {
 
     // Cancel current task
     if (state.currentTask) {
-      state.currentTask.status = TaskStatus.CANCELLED;
+      state.currentTask.status = 'cancelled';
       this.stateManager.failTask(state.currentTask, 'Plan rejected by user');
     }
 
@@ -665,8 +618,8 @@ export class AutonomiExtension implements vscode.Disposable {
       '=== Autonomi Status ===',
       `Running: ${state.isRunning}`,
       `Phase: ${state.phase || 'None'}`,
-      `Session Cost: $${state.sessionCost.toFixed(2)}`,
-      `Queue Size: ${state.taskQueue.length}`,
+      `Session Cost: $${state.cost.sessionCost.toFixed(2)}`,
+      `Queue Size: ${state.queue.pending.length}`,
       `Active Agents: ${state.activeAgents.length}`,
       ''
     ];
@@ -679,13 +632,13 @@ export class AutonomiExtension implements vscode.Disposable {
       lines.push(`  Confidence: ${state.currentTask.confidence?.toFixed(2) || 'N/A'}`);
     }
 
-    if (state.pendingPlan) {
+    if (state.currentPlan) {
       lines.push('');
-      lines.push('Pending Plan:');
-      lines.push(`  ID: ${state.pendingPlan.id}`);
-      lines.push(`  Steps: ${state.pendingPlan.steps.length}`);
-      lines.push(`  Est. Cost: $${state.pendingPlan.totalEstimatedCost.toFixed(2)}`);
-      lines.push(`  Requires Approval: ${state.pendingPlan.requiresApproval}`);
+      lines.push('Current Plan:');
+      lines.push(`  ID: ${state.currentPlan.id}`);
+      lines.push(`  Steps: ${state.currentPlan.steps.length}`);
+      lines.push(`  Est. Cost: $${state.currentPlan.totalEstimatedCost.toFixed(2)}`);
+      lines.push(`  Approved: ${state.currentPlan.approved}`);
     }
 
     this.outputChannel.clear();
@@ -698,7 +651,7 @@ export class AutonomiExtension implements vscode.Disposable {
    */
   private clearQueue(): void {
     this.taskQueue.clear();
-    this.stateManager.setState({ taskQueue: [] });
+    this.stateManager.clearQueue();
     vscode.window.showInformationMessage('Task queue cleared');
   }
 

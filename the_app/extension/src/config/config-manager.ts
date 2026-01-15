@@ -3,12 +3,30 @@
  */
 
 import * as vscode from 'vscode';
-import { BudgetConfig, ApprovalGateConfig, ConfidenceTier } from '../types';
+import { ConfidenceTier } from '../providers/types';
 import { Logger } from '../utils/logger';
 
 // Configuration keys
 const CONFIG_SECTION = 'autonomi';
 const SECRET_PREFIX = 'autonomi.apiKey.';
+
+// Budget configuration interface
+export interface BudgetConfig {
+  taskBudget: number;
+  sessionBudget: number;
+  dailyBudget: number;
+  warningThreshold: number;
+}
+
+// Approval gate configuration interface
+export interface ApprovalGateConfig {
+  productionDeploy: boolean;
+  databaseMigration: boolean;
+  securityChanges: boolean;
+  newDependencies: boolean;
+  fileDeletion: boolean;
+  costThreshold: number;
+}
 
 // Default configurations
 const DEFAULT_BUDGETS: BudgetConfig = {
@@ -190,7 +208,7 @@ export class ConfigManager {
   /**
    * Get quality gate configuration
    */
-  getQualityGateConfig(): { enabled: boolean; tiers: number[] }[] {
+  getQualityGateConfig(): Array<{ enabled: boolean; tiers: number[] }> {
     return [
       {
         enabled: this.config.get<boolean>('quality.staticAnalysis.enabled', true),
