@@ -27,6 +27,8 @@ mkdir -p "$EXPORT_DIR"
 CURRENT_PHASE="UNKNOWN"
 if [ -f "$LOKI_DIR/state/orchestrator.json" ]; then
     CURRENT_PHASE=$(python3 -c "import json; print(json.load(open('$LOKI_DIR/state/orchestrator.json')).get('currentPhase', 'UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+else
+    log_warn "orchestrator.json not found, using phase: UNKNOWN"
 fi
 
 # Map Loki phases to Vibe Kanban columns
@@ -54,6 +56,25 @@ export_queue() {
 import json
 import os
 from datetime import datetime
+
+def get_payload_title(payload):
+    """Extract title from payload, handling both dict and string types."""
+    if isinstance(payload, dict):
+        return payload.get('action', payload.get('description', 'Task'))
+    return 'Task'
+
+def get_payload_description(payload):
+    """Build description from payload, handling both dict and string types."""
+    if isinstance(payload, dict):
+        desc_parts = []
+        if 'action' in payload:
+            desc_parts.append(f"Action: {payload['action']}")
+        if 'description' in payload:
+            desc_parts.append(payload['description'])
+        if 'command' in payload:
+            desc_parts.append(f"Command: {payload['command']}")
+        return "\n".join(desc_parts) if desc_parts else json.dumps(payload, indent=2)
+    return str(payload)
 
 try:
     with open("$queue_file") as f:
@@ -83,19 +104,10 @@ for task in tasks:
     else:
         vibe_status = "todo"
 
-    # Build description from payload
+    # Extract payload info using helper functions
     payload = task.get('payload', {})
-    if isinstance(payload, dict):
-        desc_parts = []
-        if 'action' in payload:
-            desc_parts.append(f"Action: {payload['action']}")
-        if 'description' in payload:
-            desc_parts.append(payload['description'])
-        if 'command' in payload:
-            desc_parts.append(f"Command: {payload['command']}")
-        description = "\n".join(desc_parts) if desc_parts else json.dumps(payload, indent=2)
-    else:
-        description = str(payload)
+    title = get_payload_title(payload)
+    description = get_payload_description(payload)
 
     # Get agent type for tagging
     agent_type = task.get('type', 'unknown')
@@ -112,7 +124,7 @@ for task in tasks:
 
     vibe_task = {
         "id": f"loki-{task_id}",
-        "title": f"[{agent_type}] {payload.get('action', 'Task')}",
+        "title": f"[{agent_type}] {title}",
         "description": description,
         "status": vibe_status,
         "agent": "claude-code",

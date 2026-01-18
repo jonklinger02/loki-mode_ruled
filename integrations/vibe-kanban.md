@@ -12,6 +12,78 @@ Loki Mode can optionally integrate with [Vibe Kanban](https://github.com/BloopAI
 | Code review | Automated 3-reviewer | + Visual diff review |
 | Parallel agents | Background subagents | Isolated git worktrees |
 
+## Quick Start Guide
+
+### Step 1: Start Vibe Kanban
+
+In your project directory:
+
+```bash
+npx vibe-kanban
+```
+
+This will:
+- Start the Vibe Kanban server (usually on http://127.0.0.1:53380 or similar)
+- Automatically open the UI in your browser
+- Keep the server running (leave this terminal open)
+
+### Step 2: Run Loki Mode
+
+**Option A: Using Autonomy Runner (Recommended)**
+
+Open a NEW terminal in the same project directory:
+
+```bash
+./autonomy/run.sh ./prd.md
+```
+
+This automatically creates `.loki/STATUS.txt` and task queues.
+
+**Option B: Manual Mode via Claude Code**
+
+```bash
+claude --dangerously-skip-permissions
+```
+
+Then in Claude:
+```
+Loki Mode with PRD at ./prd.md
+```
+
+Note: Manual mode creates task queues in `.loki/queue/` but not STATUS.txt.
+
+### Step 3: Export Tasks to Vibe Kanban
+
+Open a THIRD terminal in the same project directory:
+
+```bash
+./scripts/export-to-vibe-kanban.sh
+```
+
+You should see output like:
+```
+[INFO] Exporting Loki Mode tasks to Vibe Kanban...
+[INFO] Export directory: /Users/username/.vibe-kanban/loki-tasks
+[INFO] Current phase: DEVELOPMENT
+[INFO]   pending: 5 tasks
+[INFO]   in-progress: 3 tasks
+[INFO] Exported 8 tasks total
+```
+
+### Step 4: View Tasks in Vibe Kanban
+
+Refresh your Vibe Kanban browser window. You should now see Loki tasks appearing on the board.
+
+### Step 5: Real-Time Updates (Optional)
+
+For automatic sync, run the watcher in a fourth terminal:
+
+```bash
+./scripts/vibe-sync-watcher.sh
+```
+
+This watches `.loki/queue/` for changes and automatically re-exports tasks.
+
 ## Setup
 
 ### 1. Install Vibe Kanban
@@ -186,9 +258,67 @@ If running Loki Mode on multiple projects, see all in one Vibe Kanban instance.
 | Code review before merge | Use Vibe Kanban's diff viewer |
 | Multiple concurrent PRDs | Vibe Kanban for project switching |
 
+## Troubleshooting
+
+### Issue: "Exported 0 tasks total"
+
+**Cause:** No tasks in `.loki/queue/` yet.
+
+**Solutions:**
+1. Make sure Loki Mode is actually running and has created tasks
+2. Check if `.loki/queue/` directory exists: `ls -la .loki/queue/`
+3. Verify queue files have content: `cat .loki/queue/pending.json`
+4. If running manual mode, Loki creates tasks as it works - give it time to start
+
+### Issue: "AttributeError: 'str' object has no attribute 'get'"
+
+**Cause:** Task payload was a string instead of expected JSON object (fixed in v2.35.1).
+
+**Solution:** Update to latest version or apply the fix from PR #9.
+
+### Issue: "STATUS.txt does not exist"
+
+**Cause:** `.loki/STATUS.txt` is only created when using the autonomy runner.
+
+**Solutions:**
+- Use autonomy runner: `./autonomy/run.sh ./prd.md` instead of manual Claude Code
+- Or check task queues directly: `ls -la .loki/queue/`
+- Monitor orchestrator state: `cat .loki/state/orchestrator.json | jq`
+
+### Issue: "Tasks not appearing in Vibe Kanban"
+
+**Checklist:**
+1. Is Vibe Kanban running? Check http://127.0.0.1:53380
+2. Did you run the export script? `./scripts/export-to-vibe-kanban.sh`
+3. Check export directory has files: `ls ~/.vibe-kanban/loki-tasks/`
+4. Refresh the Vibe Kanban browser window
+5. Check Vibe Kanban is configured to watch that directory
+
+### Issue: "No real-time updates"
+
+**Explanation:** The export script runs on-demand, not automatically.
+
+**Solutions:**
+1. Run `./scripts/vibe-sync-watcher.sh` for automatic sync
+2. Or manually run export script periodically: `watch -n 10 ./scripts/export-to-vibe-kanban.sh`
+3. Or refresh manually when you want to check progress
+
+## Expected Workflow
+
+**Important:** This is a manual integration, not automatic. Here's what to expect:
+
+1. Start Vibe Kanban (terminal 1, keeps running)
+2. Start Loki Mode (terminal 2, keeps running)
+3. Wait for Loki to create some tasks
+4. Run export script (terminal 3, one-time or via watcher)
+5. Refresh Vibe Kanban in browser to see tasks
+
+**Loki does NOT automatically push to Vibe Kanban.** You must run the export script.
+
 ## Future Integration Ideas
 
 - [ ] Bidirectional sync (Vibe → Loki)
+- [ ] Automatic background sync without watcher script
 - [ ] Vibe Kanban MCP server for agent communication
 - [ ] Shared agent profiles between tools
 - [ ] Unified logging dashboard

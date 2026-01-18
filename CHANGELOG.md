@@ -5,6 +5,50 @@ All notable changes to Loki Mode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.0] - 2026-01-18
+
+### Fixed - Vibe Kanban Integration Issues
+
+**Resolved critical issues in Vibe Kanban export integration with comprehensive security and quality improvements.**
+
+#### Security Fixes
+- **Command Injection Vulnerability**: Fixed command injection vulnerability in `scripts/vibe-sync-watcher.sh:90` by replacing `find -exec md5sum` with safe `find -print0 | xargs -0 md5sum` pattern
+- **File Permissions**: Ensured safe file handling in polling mode
+
+#### Bug Fixes
+- **AttributeError in Export Script**: Fixed `scripts/export-to-vibe-kanban.sh:115` to handle both dict and string payloads using `isinstance()` check
+- **Race Condition**: Changed `inotifywait -e modify` to `-e close_write` in watcher script to wait for complete file writes before triggering export
+- **Error Handling**: Added error checks at all 4 locations where export script is called in watcher, displaying warnings on failure
+- **Debug Logging**: Added warning when `orchestrator.json` is not found to help diagnose configuration issues
+
+#### Code Quality
+- **Reduced Duplication**: Extracted duplicate payload handling code into helper functions (`get_payload_title()`, `get_payload_description()`) eliminating 20+ lines of duplication
+- **Shellcheck Compliance**: All scripts pass shellcheck validation
+
+#### Added
+- **Watcher Script**: Created `scripts/vibe-sync-watcher.sh` for automatic task syncing with cross-platform support (fswatch/inotifywait/polling fallback)
+- **Test Coverage**: Added comprehensive test suite `tests/test-vibe-kanban-export.sh` with 6 test cases covering:
+  - Dict payload handling with action/description/command fields
+  - String payload handling with fallback to 'Task' title
+  - Priority mapping (high >=8, medium >=5, low <5)
+  - Status mapping (pending->todo, in-progress->doing, completed->done, failed->blocked)
+  - Summary file creation with current phase
+  - Missing orchestrator.json warning display
+
+#### Documentation
+- **Integration Guide**: Enhanced `integrations/vibe-kanban.md` with step-by-step instructions, troubleshooting section, and realistic expectations about manual export workflow
+- **README Updates**: Clarified Vibe Kanban integration requirements in main README
+
+#### Technical Details
+- Watcher supports three modes: fswatch (macOS), inotifywait (Linux), and polling fallback (BSD/universal)
+- Color-coded logging for better visibility (green=success, yellow=warning, red=error)
+- Graceful degradation when file watching tools unavailable
+- Cross-platform compatibility tested on macOS and Linux environments
+
+**Related**: Fixes #8 | PR #9
+
+---
+
 ## [2.36.11] - 2026-01-17
 
 ### Added - External Research Integration (Velocity-Quality, OptiMind, k8s-valkey-operator)
