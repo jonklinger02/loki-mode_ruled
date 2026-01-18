@@ -1483,6 +1483,251 @@ else:
 QUERY_SCRIPT
 }
 
+#===============================================================================
+# Confidence-Based Routing
+#===============================================================================
+# Multi-tier routing based on task confidence scores
+# Tier 1 (>=0.95): Auto-approve - execute immediately
+# Tier 2 (>=0.70): Direct with review - execute then review
+# Tier 3 (>=0.40): Supervisor mode - full orchestration
+# Tier 4 (<0.40): Escalate - too uncertain, needs guidance
+
+calculate_task_confidence() {
+    # Calculate confidence score (0.0-1.0) for a task
+    local task_file="$1"
+    local output_file="${2:-.loki/state/task-confidence.json}"
+
+    if [ ! -f "$task_file" ]; then
+        echo '{"confidence":0.5,"tier":"supervisor","factors":{}}' > "$output_file"
+        return 0
+    fi
+
+    python3 << CONFIDENCE_SCRIPT
+import json
+import os
+import re
+from datetime import datetime, timezone
+
+task_file = "$task_file"
+output_file = "$output_file"
+
+with open(task_file, 'r') as f:
+    task = json.load(f)
+
+# Factor 1: Requirement Clarity (0.0-1.0)
+def assess_requirement_clarity(task):
+    """Score based on how clear and specific the requirements are."""
+    description = str(task.get('payload', {}).get('description', task.get('description', '')))
+
+    # Check for ambiguous language
+    ambiguous_terms = ['maybe', 'perhaps', 'might', 'probably', 'unclear', 'not sure', 'possibly', 'could be']
+    ambiguity_count = sum(1 for term in ambiguous_terms if term in description.lower())
+
+    # Check for concrete elements
+    has_goal = bool(task.get('payload', {}).get('goal', ''))
+    has_constraints = bool(task.get('payload', {}).get('constraints', []))
+    has_target = bool(task.get('payload', {}).get('target', ''))
+    has_action = bool(task.get('payload', {}).get('action', ''))
+
+    # Calculate score
+    base_score = 1.0 - min(0.6, ambiguity_count * 0.15)
+    if has_goal: base_score += 0.1
+    if has_constraints: base_score += 0.1
+    if has_target: base_score += 0.1
+    if has_action: base_score += 0.1
+
+    return min(1.0, max(0.0, base_score))
+
+# Factor 2: Historical Success (0.0-1.0)
+def check_historical_success(task):
+    """Score based on similar task outcomes."""
+    task_type = task.get('type', 'unknown')
+    category = task.get('payload', {}).get('category', task_type)
+
+    # Load completed tasks
+    completed_file = '.loki/queue/completed.json'
+    if not os.path.exists(completed_file):
+        return 0.6  # Neutral if no history
+
+    try:
+        with open(completed_file, 'r') as f:
+            completed = json.load(f)
+
+        similar = [t for t in completed.get('tasks', [])
+                   if t.get('type') == task_type]
+
+        if not similar:
+            return 0.6  # Neutral if no similar tasks
+
+        success_count = sum(1 for t in similar
+                            if t.get('result', {}).get('status') == 'success')
+        return success_count / len(similar)
+    except:
+        return 0.6
+
+# Factor 3: Complexity Assessment (0.0-1.0)
+def assess_complexity(task):
+    """Score inversely proportional to task complexity."""
+    priority = task.get('priority', 5)
+    dependencies = len(task.get('dependencies', []))
+    timeout = task.get('timeout', 3600)
+
+    # Higher priority often = simpler task
+    # More dependencies = more complex
+    # Shorter timeout = expected to be simpler
+
+    score = 0.8
+    score -= (10 - priority) * 0.03  # Priority 10 = simple, 1 = complex
+    score -= dependencies * 0.1       # Each dependency reduces confidence
+    if timeout > 3600: score -= 0.1   # Long timeout = complex
+    if timeout < 300: score += 0.1    # Short timeout = simple
+
+    return min(1.0, max(0.0, score))
+
+# Factor 4: Resource Availability (0.0-1.0)
+def check_resources():
+    """Score based on current system resources."""
+    resources_file = '.loki/state/resources.json'
+    if not os.path.exists(resources_file):
+        return 0.8  # Assume good if no monitoring
+
+    try:
+        with open(resources_file, 'r') as f:
+            resources = json.load(f)
+
+        cpu = resources.get('cpu', 0)
+        memory = resources.get('memory', 0)
+        agents = resources.get('activeAgents', 0)
+        max_agents = 10  # MAX_PARALLEL_AGENTS
+
+        # Lower score if resources are strained
+        score = 1.0
+        if cpu > 80: score -= 0.3
+        elif cpu > 60: score -= 0.1
+        if memory > 80: score -= 0.3
+        elif memory > 60: score -= 0.1
+        if agents >= max_agents: score -= 0.4
+        elif agents > max_agents * 0.7: score -= 0.2
+
+        return max(0.0, score)
+    except:
+        return 0.8
+
+# Calculate weighted confidence
+weights = {
+    'requirement_clarity': 0.35,
+    'historical_success': 0.25,
+    'complexity': 0.25,
+    'resources': 0.15
+}
+
+factors = {
+    'requirement_clarity': assess_requirement_clarity(task),
+    'historical_success': check_historical_success(task),
+    'complexity': assess_complexity(task),
+    'resources': check_resources()
+}
+
+confidence = sum(factors[k] * weights[k] for k in factors)
+confidence = round(confidence, 3)
+
+# Determine tier
+if confidence >= 0.95:
+    tier = 'auto-approve'
+elif confidence >= 0.70:
+    tier = 'direct-review'
+elif confidence >= 0.40:
+    tier = 'supervisor'
+else:
+    tier = 'escalate'
+
+result = {
+    'confidence': confidence,
+    'tier': tier,
+    'factors': {k: round(v, 3) for k, v in factors.items()},
+    'weights': weights,
+    'taskId': task.get('id', 'unknown'),
+    'taskType': task.get('type', 'unknown'),
+    'calculatedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+}
+
+with open(output_file, 'w') as f:
+    json.dump(result, f, indent=2)
+
+print(f"CONFIDENCE:{confidence}")
+print(f"TIER:{tier}")
+CONFIDENCE_SCRIPT
+}
+
+route_task_by_confidence() {
+    # Route a task based on its confidence score
+    local task_file="$1"
+    local action=""
+
+    # Calculate confidence if not already done
+    if [ ! -f ".loki/state/task-confidence.json" ]; then
+        calculate_task_confidence "$task_file"
+    fi
+
+    local confidence_file=".loki/state/task-confidence.json"
+    local tier=$(python3 -c "import json; print(json.load(open('$confidence_file'))['tier'])")
+    local confidence=$(python3 -c "import json; print(json.load(open('$confidence_file'))['confidence'])")
+
+    log_info "Task confidence: $confidence (tier: $tier)"
+
+    case "$tier" in
+        "auto-approve")
+            log_info "Auto-approving task (high confidence)"
+            action="execute_direct"
+            ;;
+        "direct-review")
+            log_info "Executing with post-review (medium-high confidence)"
+            action="execute_with_review"
+            ;;
+        "supervisor")
+            log_info "Full supervisor orchestration (medium confidence)"
+            action="supervisor_mode"
+            ;;
+        "escalate")
+            log_warn "Task escalated - confidence too low"
+            action="escalate"
+            ;;
+    esac
+
+    echo "$action"
+}
+
+get_routing_recommendation() {
+    # Get routing recommendation for a task without executing
+    local task_file="$1"
+
+    calculate_task_confidence "$task_file" ".loki/state/task-confidence.json"
+
+    python3 << RECOMMEND_SCRIPT
+import json
+
+with open('.loki/state/task-confidence.json', 'r') as f:
+    result = json.load(f)
+
+tier_descriptions = {
+    'auto-approve': 'Execute immediately without review (very high confidence)',
+    'direct-review': 'Execute then run automated review (high confidence)',
+    'supervisor': 'Use full supervisor orchestration (moderate confidence)',
+    'escalate': 'Seek clarification before proceeding (low confidence)'
+}
+
+print(f"Confidence: {result['confidence']:.1%}")
+print(f"Tier: {result['tier']}")
+print(f"Recommendation: {tier_descriptions[result['tier']]}")
+print()
+print("Factor breakdown:")
+for factor, score in result['factors'].items():
+    weight = result['weights'][factor]
+    contribution = score * weight
+    print(f"  {factor}: {score:.1%} (weight: {weight:.0%}, contribution: {contribution:.3f})")
+RECOMMEND_SCRIPT
+}
+
 start_dashboard() {
     log_header "Starting Loki Dashboard"
 
