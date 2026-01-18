@@ -5,6 +5,42 @@ All notable changes to Loki Mode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.38.0] - 2026-01-18
+
+### Added - Global Rules Integration
+
+**Automatic discovery and loading of coding rules from global and project directories.**
+
+#### Features
+- **Rule Discovery**: Automatically finds rules in 4 directories (priority order):
+  1. `.cursor/rules/` (project-local, highest priority)
+  2. `.claude/rules/` (project-local)
+  3. `~/.cursor/rules/` (global)
+  4. `~/.claude/rules/` (global, lowest priority)
+- **Flexible Selection**: Multiple ways to select rules:
+  - `LOKI_RULES` env var for explicit selection
+  - Saved preferences in `.loki/config/rules.txt`
+  - `LOKI_INTERACTIVE_RULES=true` for multiselect prompt
+  - Default: load all available rules
+- **Deduplication**: Rules with same name loaded only once (project takes priority)
+- **Index File**: Auto-generated `.loki/rules/INDEX.md` lists loaded rules
+
+#### New Environment Variables
+- `LOKI_RULES`: Comma-separated list of rules to load
+- `LOKI_INTERACTIVE_RULES`: Enable interactive selection via AskUserQuestion
+
+#### New Invocation Patterns
+```
+Loki Mode                                    # Load all available rules
+Loki Mode with rules                         # Interactive rule selection
+Loki Mode with rules react,firebase-rules    # Load specific rules only
+```
+
+#### Test Coverage
+- 10 new tests for rules discovery, loading, and configuration
+
+---
+
 ## [2.37.1] - 2026-01-18
 
 ### Fixed - Direct SQLite Sync for Vibe Kanban
