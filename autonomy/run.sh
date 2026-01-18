@@ -16,6 +16,12 @@
 #   LOKI_DASHBOARD      - Enable web dashboard (default: true)
 #   LOKI_DASHBOARD_PORT - Dashboard port (default: 57374)
 #
+# Rules Configuration:
+#   LOKI_RULES                 - Comma-separated list of rules to load (default: all)
+#                                Example: "react,firebase-rules,clean-code"
+#                                Searches: .cursor/rules, .claude/rules, ~/.cursor/rules, ~/.claude/rules
+#   LOKI_INTERACTIVE_RULES     - Enable interactive rule selection via AskUserQuestion (default: false)
+#
 # Resource Monitoring (prevents system overload):
 #   LOKI_RESOURCE_CHECK_INTERVAL - Check resources every N seconds (default: 300 = 5min)
 #   LOKI_RESOURCE_CPU_THRESHOLD  - CPU % threshold to warn (default: 80)
@@ -322,6 +328,127 @@ EOF
     fi
 
     log_info "Loki directory initialized: .loki/"
+}
+
+#===============================================================================
+# Global Rules Discovery and Loading
+#===============================================================================
+
+discover_rules() {
+    local rules_found=()
+    local search_dirs=(
+        ".cursor/rules"
+        ".claude/rules"
+        "$HOME/.cursor/rules"
+        "$HOME/.claude/rules"
+    )
+
+    for dir in "${search_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            for rule_file in "$dir"/*.mdc "$dir"/*.md; do
+                if [ -f "$rule_file" ]; then
+                    local rule_name=$(basename "$rule_file" | sed 's/\.\(mdc\|md\)$//')
+                    if [[ ! " ${rules_found[*]} " =~ " ${rule_name} " ]]; then
+                        rules_found+=("$rule_name")
+                    fi
+                fi
+            done
+        fi
+    done
+
+    local IFS=','
+    echo "${rules_found[*]}"
+}
+
+find_rule_source() {
+    local rule_name="$1"
+    local search_dirs=(
+        ".cursor/rules"
+        ".claude/rules"
+        "$HOME/.cursor/rules"
+        "$HOME/.claude/rules"
+    )
+
+    for dir in "${search_dirs[@]}"; do
+        if [ -f "$dir/${rule_name}.mdc" ]; then
+            echo "$dir/${rule_name}.mdc"
+            return 0
+        elif [ -f "$dir/${rule_name}.md" ]; then
+            echo "$dir/${rule_name}.md"
+            return 0
+        fi
+    done
+    return 1
+}
+
+generate_rules_index() {
+    local index_file=".loki/rules/INDEX.md"
+
+    cat > "$index_file" << 'EOF'
+# Loaded Rules Index
+
+These rules have been loaded for this Loki Mode session.
+
+## Available Rules
+
+EOF
+
+    for rule_file in .loki/rules/*.mdc .loki/rules/*.md; do
+        if [ -f "$rule_file" ] && [ "$(basename "$rule_file")" != "INDEX.md" ]; then
+            local rule_name=$(basename "$rule_file")
+            local description=$(grep -A1 "^description:" "$rule_file" 2>/dev/null | tail -1 | sed 's/^description: *//' || echo "")
+            echo "- **$rule_name**: $description" >> "$index_file"
+        fi
+    done
+}
+
+load_rules() {
+    log_header "Loading Project Rules"
+
+    local available_rules=$(discover_rules)
+
+    if [ -z "$available_rules" ]; then
+        log_info "No rules found in any rules directory"
+        return 0
+    fi
+
+    log_info "Available rules: $available_rules"
+
+    local rules_to_load=""
+
+    if [ -n "${LOKI_RULES:-}" ]; then
+        rules_to_load="$LOKI_RULES"
+        log_info "Using LOKI_RULES from environment: $rules_to_load"
+    elif [ -f ".loki/config/rules.txt" ]; then
+        rules_to_load=$(cat ".loki/config/rules.txt")
+        log_info "Using saved rule selection: $rules_to_load"
+    elif [ "${LOKI_INTERACTIVE_RULES:-}" = "true" ]; then
+        log_info "Interactive rule selection enabled - will be handled by skill"
+        echo "$available_rules" > ".loki/state/available-rules.txt"
+        return 0
+    else
+        rules_to_load="$available_rules"
+        log_info "Loading all available rules"
+    fi
+
+    local loaded_count=0
+    IFS=',' read -ra RULE_ARRAY <<< "$rules_to_load"
+    for rule in "${RULE_ARRAY[@]}"; do
+        rule=$(echo "$rule" | xargs)
+        local source_path=$(find_rule_source "$rule")
+
+        if [ -n "$source_path" ]; then
+            cp "$source_path" ".loki/rules/"
+            log_info "  Loaded: $rule"
+            ((loaded_count++))
+        else
+            log_warn "  Rule not found: $rule"
+        fi
+    done
+
+    echo "$rules_to_load" > ".loki/config/rules.txt"
+    generate_rules_index
+    log_info "Loaded $loaded_count rules to .loki/rules/"
 }
 
 #===============================================================================
@@ -1969,6 +2096,9 @@ main() {
 
     # Initialize .loki directory
     init_loki_dir
+
+    # Load project rules (from global or local rules directories)
+    load_rules
 
     # Start web dashboard (if enabled)
     if [ "$ENABLE_DASHBOARD" = "true" ]; then

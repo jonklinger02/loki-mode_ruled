@@ -1475,14 +1475,22 @@ See `references/architecture.md` for full structure and state schemas.
 ## Invocation
 
 ```
-Loki Mode                           # Start fresh
-Loki Mode with PRD at path/to/prd   # Start with PRD
+Loki Mode                                    # Load all available rules
+Loki Mode with PRD at path/to/prd            # Load all rules + PRD
+Loki Mode with rules                         # Interactive rule selection
+Loki Mode with rules react,firebase-rules    # Load specific rules only
 ```
+
+**Rules Configuration:**
+- Rules are loaded from: `.cursor/rules/`, `.claude/rules/`, `~/.cursor/rules/`, `~/.claude/rules/`
+- Supports `.mdc` and `.md` file extensions
+- Use `LOKI_RULES=react,clean-code ./autonomy/run.sh` to specify rules via environment
+- Loaded rules available at `.loki/rules/INDEX.md`
 
 **Skill Metadata:**
 | Field | Value |
 |-------|-------|
-| Trigger | "Loki Mode" or "Loki Mode with PRD at [path]" |
+| Trigger | "Loki Mode" or "Loki Mode with PRD at [path]" or "Loki Mode with rules [list]" |
 | Skip When | Need human approval, want to review plan first, single small task |
 | Related Skills | subagent-driven-development, executing-plans |
 

@@ -1,0 +1,14 @@
+---
+description: Test rule for verifying rules discovery functionality
+globs: **/*.test.ts, **/*.spec.ts
+alwaysApply: false
+---
+
+# Test Rule
+
+This is a sample rule file for testing the Global Rules Integration feature.
+
+## Guidelines
+- Write clear test descriptions
+- Use meaningful assertions
+- Follow AAA pattern (Arrange, Act, Assert)
