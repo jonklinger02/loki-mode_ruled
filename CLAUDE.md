@@ -1,120 +1,148 @@
-# Loki Mode - Claude Code Skill
+# CLAUDE.md
 
-Multi-agent autonomous startup system for Claude Code. Takes PRD to fully deployed, revenue-generating product with zero human intervention.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Quick Start
+## Project Overview
 
+Loki Mode is a Claude Code skill that orchestrates 37 specialized AI agent types across 6 swarms to autonomously build, test, deploy, and scale complete startups from a PRD. Zero human intervention required.
+
+## Commands
+
+### Running Loki Mode
 ```bash
-# Launch Claude Code with autonomous permissions
+# Autonomous mode (recommended)
+./autonomy/run.sh ./path/to/prd.md
+
+# Manual mode
 claude --dangerously-skip-permissions
+> Loki Mode with PRD at ./path/to/prd.md
 
-# Then invoke:
-# "Loki Mode" or "Loki Mode with PRD at path/to/prd"
+# With specific rules
+> Loki Mode with rules react,firebase-rules
 ```
 
-## Project Structure
+### Testing
+```bash
+# Run all tests
+./tests/run-all-tests.sh
 
-```
-SKILL.md                    # Main skill definition (read this first)
-references/                 # Detailed documentation (loaded progressively)
-  openai-patterns.md        # OpenAI Agents SDK: guardrails, tripwires, handoffs
-  lab-research-patterns.md  # DeepMind + Anthropic: Constitutional AI, debate
-  production-patterns.md    # HN 2025: What actually works in production
-  advanced-patterns.md      # 2025 research patterns (MAR, Iter-VF, GoalAct)
-  tool-orchestration.md     # ToolOrchestra-inspired efficiency & rewards
-  memory-system.md          # Episodic/semantic memory architecture
-  quality-control.md        # Code review, anti-sycophancy, guardrails
-  agent-types.md            # 37 specialized agent definitions
-  sdlc-phases.md            # Full SDLC workflow
-  task-queue.md             # Queue system, circuit breakers
-  spec-driven-dev.md        # OpenAPI-first development
-  architecture.md           # Directory structure, state schemas
-  core-workflow.md          # RARV cycle, autonomy rules
-  claude-best-practices.md  # Boris Cherny patterns
-  deployment.md             # Cloud deployment instructions
-  business-ops.md           # Business operation workflows
-  mcp-integration.md        # MCP server capabilities
-autonomy/                   # Runtime state and constitution
-benchmarks/                 # SWE-bench and HumanEval benchmarks
+# Run individual test suites
+./tests/test-bootstrap.sh        # Directory structure, state init
+./tests/test-task-queue.sh       # Queue operations, priorities
+./tests/test-circuit-breaker.sh  # Failure handling, recovery
+./tests/test-agent-timeout.sh    # Timeout, stuck process handling
+./tests/test-state-recovery.sh   # Checkpoints, recovery
+./tests/test-confidence-routing.sh  # 4-tier routing system
+./tests/test-debate-verification.sh # DeepMind debate pattern
+./tests/test-review-to-memory.sh    # Learning from code reviews
 ```
 
-## Key Concepts
+### Benchmarks
+```bash
+# HumanEval benchmark
+./benchmarks/run-benchmarks.sh humaneval --execute              # Direct Claude (baseline)
+./benchmarks/run-benchmarks.sh humaneval --execute --loki       # Multi-agent RARV mode
+./benchmarks/run-benchmarks.sh humaneval --execute --limit 10   # First 10 problems only
+
+# SWE-bench benchmark
+./benchmarks/run-benchmarks.sh swebench --execute --loki
+```
+
+### Environment Variables
+```bash
+LOKI_MAX_RETRIES=50      # Max retry attempts (default: 50)
+LOKI_BASE_WAIT=60        # Base wait time in seconds
+LOKI_MAX_WAIT=3600       # Max wait time (1 hour)
+LOKI_DEBATE_ENABLED=true # Enable debate verification
+LOKI_DEBATE_THRESHOLD=0.70  # Confidence threshold for debate
+```
+
+## Architecture
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `SKILL.md` | Main skill definition (~1350 lines) - read this first |
+| `references/` | Detailed documentation loaded progressively |
+| `autonomy/run.sh` | Autonomous wrapper script with rate limit handling |
+| `benchmarks/run-benchmarks.sh` | HumanEval and SWE-bench benchmark runner |
+
+### Runtime State (`.loki/` directory)
+```
+.loki/
+  CONTINUITY.md           # Working memory - read/update every turn
+  specs/openapi.yaml      # API spec - source of truth
+  queue/*.json            # Task queue (pending, in-progress, completed, dead-letter)
+  state/orchestrator.json # Master state (phase, metrics)
+  memory/                 # Episodic, semantic, and procedural memory
+  metrics/                # Efficiency tracking and reward signals
+```
 
 ### RARV Cycle
 Every iteration follows: **R**eason -> **A**ct -> **R**eflect -> **V**erify
 
-### Model Selection
-- **Opus**: Planning and architecture ONLY (system design, high-level decisions)
-- **Sonnet**: Development and functional testing (implementation, integration tests)
-- **Haiku**: Unit tests, monitoring, and simple tasks - use extensively for parallelization
+1. Read `.loki/CONTINUITY.md` including "Mistakes & Learnings"
+2. Execute task, commit atomically
+3. Update CONTINUITY.md with progress
+4. Run tests, verify against spec, retry on failure
 
-### Quality Gates
-1. Static analysis (CodeQL, ESLint)
-2. 3-reviewer parallel system (blind review)
-3. Anti-sycophancy checks (devil's advocate on unanimous approval)
-4. Severity-based blocking (Critical/High/Medium = BLOCK)
-5. Test coverage gates (>80% unit, 100% pass)
+### Model Selection by SDLC Phase
+- **Opus**: Bootstrap, Discovery, Architecture, Development (planning, implementation)
+- **Sonnet**: QA, Deployment (testing, release automation)
+- **Haiku**: Operations, monitoring, unit tests (use extensively in parallel)
 
-### Memory System
-- **Episodic**: Specific interaction traces (`.loki/memory/episodic/`)
-- **Semantic**: Generalized patterns (`.loki/memory/semantic/`)
-- **Procedural**: Learned skills (`.loki/memory/skills/`)
+### Quality Gates (7 total)
+1. Input Guardrails - scope validation
+2. Static Analysis - CodeQL, ESLint
+3. Blind Review - 3 parallel reviewers
+4. Anti-Sycophancy - devil's advocate on unanimous approval
+5. Output Guardrails - spec compliance, no secrets
+6. Severity Blocking - Critical/High/Medium = BLOCK
+7. Test Coverage - Unit: >80%, 100% pass
 
-### Metrics System (ToolOrchestra-inspired)
-- **Efficiency**: Task cost tracking (`.loki/metrics/efficiency/`)
-- **Rewards**: Outcome/efficiency/preference signals (`.loki/metrics/rewards/`)
+### Confidence-Based Routing
+| Confidence | Tier | Behavior |
+|------------|------|----------|
+| >= 0.95 | Auto-Approve | Direct execution |
+| 0.70-0.95 | Direct + Review | Execute then validate |
+| 0.40-0.70 | Supervisor | Full coordination |
+| < 0.40 | Escalate | Requires human decision |
 
 ## Development Guidelines
 
 ### When Modifying SKILL.md
-- Keep under 500 lines (currently ~370)
-- Reference detailed docs in `references/` instead of inlining
+- Keep under 500 lines (reference detailed docs in `references/` instead)
 - Update version in header AND footer
 - Update CHANGELOG.md with new version entry
 
 ### Version Numbering
-Follows semantic versioning: MAJOR.MINOR.PATCH
-- Current: v2.35.0
-- MINOR bump for new features
-- PATCH bump for fixes
+Current: v2.38.0 (follows semantic versioning)
 
 ### Code Style
 - No emojis in code or documentation
 - Clear, concise comments only when necessary
 - Follow existing patterns in codebase
 
-## Testing
+### Protected Files (Do Not Edit While Running)
+| File | Reason |
+|------|--------|
+| `autonomy/run.sh` | Currently executing bash script |
+| `.loki/dashboard/*` | Served by active HTTP server |
 
-```bash
-# Run benchmarks
-./benchmarks/run-benchmarks.sh humaneval --execute --loki
-./benchmarks/run-benchmarks.sh swebench --execute --loki
-```
+If bugs found, document in `.loki/CONTINUITY.md` under "Pending Fixes".
+
+### Clean Code Principles
+- Use meaningful, descriptive names
+- Keep functions small and focused (single responsibility)
+- Limit function parameters (max 3-4)
+- Avoid side effects where possible
 
 ## Research Foundation
 
-Built on 2025 research from three major AI labs:
+Built on 2025 research patterns:
+- **OpenAI**: Agents SDK (guardrails, tripwires, handoffs)
+- **DeepMind**: Scalable Oversight via Debate, SIMA 2
+- **Anthropic**: Constitutional AI, Explore-Plan-Code
+- **Academic**: CONSENSAGENT, GoalAct, ToolOrchestra, MAR
 
-**OpenAI:**
-- Agents SDK (guardrails, tripwires, handoffs, tracing)
-- AGENTS.md / Agentic AI Foundation (AAIF) standards
-
-**Google DeepMind:**
-- SIMA 2 (self-improvement, hierarchical reasoning)
-- Gemini Robotics (VLA models, planning)
-- Dreamer 4 (world model training)
-- Scalable Oversight via Debate
-
-**Anthropic:**
-- Constitutional AI (principles-based self-critique)
-- Alignment Faking Detection (sleeper agent probes)
-- Claude Code Best Practices (Explore-Plan-Code)
-
-**Academic:**
-- CONSENSAGENT (anti-sycophancy)
-- GoalAct (hierarchical planning)
-- A-Mem/MIRIX (memory systems)
-- Multi-Agent Reflexion (MAR)
-- NVIDIA ToolOrchestra (efficiency metrics)
-
-See `references/openai-patterns.md`, `references/lab-research-patterns.md`, and `references/advanced-patterns.md`.
+See `references/` for detailed implementation patterns.
