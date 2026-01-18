@@ -379,6 +379,81 @@ EOF
 
 log_pass "Idempotency check works"
 
+# Test 9: Decision Report validation
+log_test "Decision Report required for task completion"
+python3 << 'EOF'
+import json
+
+completed_file = '.loki/queue/completed.json'
+progress_file = '.loki/queue/in-progress.json'
+
+with open(completed_file, 'r') as f:
+    completed = json.load(f)
+with open(progress_file, 'r') as f:
+    progress = json.load(f)
+
+# Add a task to in-progress
+test_task = {
+    "id": "task-decision-test",
+    "type": "eng-backend",
+    "priority": 5,
+    "payload": {"action": "test decision report"}
+}
+progress['tasks'].append(test_task)
+
+def validate_decision_report(result):
+    """Check if result contains required decision report fields."""
+    if not result:
+        return False, "Missing result"
+    report = result.get('decisionReport') or result.get('decision_report')
+    if not report:
+        return False, "Missing decisionReport"
+    required_sections = ['why', 'what', 'tradeoffs']
+    # Accept any of these naming conventions
+    alt_names = {
+        'why': ['why', 'WHY', 'problem', 'rationale'],
+        'what': ['what', 'WHAT', 'changes', 'files_changed'],
+        'tradeoffs': ['tradeoffs', 'trade-offs', 'TRADE-OFFS', 'trade_offs', 'gained', 'cost']
+    }
+    for section, names in alt_names.items():
+        found = any(name in report or name.lower() in str(report).lower() for name in names)
+        if not found:
+            return False, f"Missing {section} section"
+    return True, "Valid"
+
+# Test 1: Task without decision report should fail validation
+bad_result = {'status': 'success', 'output': 'done'}
+valid, msg = validate_decision_report(bad_result)
+if not valid:
+    print(f"CORRECTLY_REJECTED:no_report")
+
+# Test 2: Task with empty decision report should fail
+partial_result = {'status': 'success', 'decisionReport': {}}
+valid, msg = validate_decision_report(partial_result)
+if not valid:
+    print(f"CORRECTLY_REJECTED:empty_report")
+
+# Test 3: Task with valid decision report should pass
+good_result = {
+    'status': 'success',
+    'decisionReport': {
+        'why': {'problem': 'X was broken', 'solution': 'Y fixed it'},
+        'what': {'files_changed': ['a.ts:1-10']},
+        'tradeoffs': {'gained': 'speed', 'cost': 'complexity'}
+    }
+}
+valid, msg = validate_decision_report(good_result)
+if valid:
+    print(f"CORRECTLY_ACCEPTED:valid_report")
+
+# Cleanup - remove test task
+progress['tasks'] = [t for t in progress['tasks'] if t['id'] != 'task-decision-test']
+with open(progress_file, 'w') as f:
+    json.dump(progress, f)
+EOF
+
+log_pass "Decision Report validation works"
+
 echo ""
 echo "========================================"
 echo "Test Summary"

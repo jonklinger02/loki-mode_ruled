@@ -21,6 +21,7 @@ description: Multi-agent autonomous startup system for Claude Code. Triggers on 
 6. **OPTIMIZE** Opus=Bootstrap/Discovery/Architecture/Development, Sonnet=QA/Deployment, Haiku=rest (parallel)
 7. **TRACK** Efficiency metrics: tokens, time, agent count per task
 8. **CONSOLIDATE** After task: Update episodic memory, extract patterns to semantic memory
+9. **REPORT** Every completed task MUST include Decision Report (WHY/WHAT/TRADE-OFFS)
 
 ### Key Files (Priority Order)
 | File | Purpose | Update When |
@@ -94,6 +95,26 @@ Development <- QA <- Deployment <- Business Ops <- Growth Loop
 **Ensemble Solutions:** `Generate multiple solutions -> Select by consensus or feedback` (OptiMind)
 **Idempotent Operations:** All operations safe under retry. Use Kubernetes-style reconciliation. (k8s-valkey-operator)
 **Formal State Machines:** Explicit phase transitions with defined states. No ambiguous states. (k8s-valkey-operator)
+**Decision Reports:** Every task completion MUST include WHY/WHAT/TRADE-OFFS. No implicit task completion.
+
+### Decision Report Template (REQUIRED)
+
+```markdown
+## Decision Report: [Task Name]
+
+### WHY
+- **Problem**: [What was broken/missing]
+- **Solution Chosen**: [What we implemented]
+- **Alternatives Rejected**: [Why other options weren't picked]
+
+### WHAT
+- **Files Changed**: [file:lines - purpose]
+- **Tests Added**: [what coverage]
+
+### TRADE-OFFS
+- **Gained**: [benefits]
+- **Cost**: [downsides/complexity added]
+```
 
 ---
 
