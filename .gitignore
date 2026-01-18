@@ -14,3 +14,12 @@ dist/
 
 # Local development (not tracked)
 the_app/
+
+#Claude files
+CLAUDE.md
+.claude/
+.cursor/
+.loki/
+.vibe-kanban/
+.vibe-kanban/
+

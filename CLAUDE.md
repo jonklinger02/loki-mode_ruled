@@ -27,14 +27,16 @@ claude --dangerously-skip-permissions
 ./tests/run-all-tests.sh
 
 # Run individual test suites
-./tests/test-bootstrap.sh        # Directory structure, state init
-./tests/test-task-queue.sh       # Queue operations, priorities
-./tests/test-circuit-breaker.sh  # Failure handling, recovery
-./tests/test-agent-timeout.sh    # Timeout, stuck process handling
-./tests/test-state-recovery.sh   # Checkpoints, recovery
+./tests/test-bootstrap.sh           # Directory structure, state init
+./tests/test-task-queue.sh          # Queue operations, priorities
+./tests/test-circuit-breaker.sh     # Failure handling, recovery
+./tests/test-agent-timeout.sh       # Timeout, stuck process handling
+./tests/test-state-recovery.sh      # Checkpoints, recovery
 ./tests/test-confidence-routing.sh  # 4-tier routing system
 ./tests/test-debate-verification.sh # DeepMind debate pattern
 ./tests/test-review-to-memory.sh    # Learning from code reviews
+./tests/test-rules-integration.sh   # Rules discovery and loading
+./tests/test-vibe-kanban-export.sh  # Vibe Kanban SQLite sync
 ```
 
 ### Benchmarks
@@ -50,11 +52,18 @@ claude --dangerously-skip-permissions
 
 ### Environment Variables
 ```bash
-LOKI_MAX_RETRIES=50      # Max retry attempts (default: 50)
-LOKI_BASE_WAIT=60        # Base wait time in seconds
-LOKI_MAX_WAIT=3600       # Max wait time (1 hour)
-LOKI_DEBATE_ENABLED=true # Enable debate verification
+# Retry/timeout settings
+LOKI_MAX_RETRIES=50         # Max retry attempts (default: 50)
+LOKI_BASE_WAIT=60           # Base wait time in seconds
+LOKI_MAX_WAIT=3600          # Max wait time (1 hour)
+
+# Verification settings
+LOKI_DEBATE_ENABLED=true    # Enable debate verification
 LOKI_DEBATE_THRESHOLD=0.70  # Confidence threshold for debate
+
+# Rules integration (v2.37.1+loki_ruled.1)
+LOKI_RULES=react,firebase   # Comma-separated rules to load (optional)
+LOKI_INTERACTIVE_RULES=true # Enable interactive rule selection prompt
 ```
 
 ## Architecture
@@ -116,12 +125,13 @@ Every iteration follows: **R**eason -> **A**ct -> **R**eflect -> **V**erify
 - Update CHANGELOG.md with new version entry
 
 ### Version Numbering
-Current: v2.38.0 (follows semantic versioning)
+Current: v2.37.1+loki_ruled.1
 
 ### Code Style
 - No emojis in code or documentation
 - Clear, concise comments only when necessary
 - Follow existing patterns in codebase
+- Additional rules in `.cursor/rules/clean-code.md`
 
 ### Protected Files (Do Not Edit While Running)
 | File | Reason |
@@ -131,11 +141,14 @@ Current: v2.38.0 (follows semantic versioning)
 
 If bugs found, document in `.loki/CONTINUITY.md` under "Pending Fixes".
 
-### Clean Code Principles
-- Use meaningful, descriptive names
-- Keep functions small and focused (single responsibility)
-- Limit function parameters (max 3-4)
-- Avoid side effects where possible
+### Rules Integration
+Rules are auto-discovered from (priority order):
+1. `.cursor/rules/` (project-local, highest priority)
+2. `.claude/rules/` (project-local)
+3. `~/.cursor/rules/` (global)
+4. `~/.claude/rules/` (global, lowest priority)
+
+Loaded rules index written to `.loki/rules/INDEX.md`.
 
 ## Research Foundation
 

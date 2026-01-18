@@ -4,6 +4,15 @@ Loki Mode stands on the shoulders of giants. This project incorporates research,
 
 ---
 
+## Original Creator
+
+**asklokesh** - Original author and creator of Loki Mode. This project is a fork of their foundational work.
+
+- GitHub: [@asklokesh](https://github.com/asklokesh)
+- Original Repository: [asklokesh/loki-mode](https://github.com/asklokesh/loki-mode)
+
+---
+
 ## Research Labs
 
 ### Anthropic

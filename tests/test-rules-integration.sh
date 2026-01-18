@@ -52,8 +52,9 @@ echo "Test directory: $TEST_DIR"
 echo ""
 
 # Test 1: discover_rules with no rules directories
+# Override HOME to prevent picking up real global rules
 log_test "discover_rules with no rules directories"
-result=$(discover_rules)
+result=$(HOME="$TEST_DIR" discover_rules)
 if [ -z "$result" ]; then
     log_pass "Returns empty when no rules found"
 else

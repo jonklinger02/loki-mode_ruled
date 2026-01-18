@@ -1,8 +1,8 @@
 # PRD: Global Rules Integration for Loki Mode
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Implemented
-**Author:** Generated via Claude Code
+**Author:** Jon Klinger
 **Date:** 2026-01-18
 
 ---
@@ -31,7 +31,7 @@ Loki Mode operates autonomously but lacks awareness of project-specific coding s
 2. **Flexible Selection** - Support env vars, interactive multiselect, and saved preferences
 3. **Agent Accessibility** - Load selected rules to `.loki/rules/` with an index for easy agent reference
 4. **Zero Config Default** - Work out-of-the-box by loading all available rules
-
+5. **Convergence & Completion** - Support "Definition of Done" rules to help agents recognize when a task is finished and prevent infinite optimization loops
 ---
 
 ## Non-Goals
@@ -215,7 +215,7 @@ load_rules() {
     elif [ -f ".loki/config/rules.txt" ]; then
         rules_to_load=$(cat ".loki/config/rules.txt")
         log_info "Using saved rule selection: $rules_to_load"
-    elif [ "$LOKI_INTERACTIVE_RULES" = "true" ]; then
+    elif [ "${LOKI_INTERACTIVE_RULES:-}" = "true" ]; then
         log_info "Interactive rule selection enabled - will be handled by skill"
         echo "$available_rules" > ".loki/state/available-rules.txt"
         return 0

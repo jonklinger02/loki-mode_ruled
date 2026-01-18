@@ -1665,8 +1665,10 @@ CONFIDENCE_SCRIPT
 
 route_task_by_confidence() {
     # Route a task based on its confidence score
+    # Integrates with debate verification for low-confidence tasks
     local task_file="$1"
     local action=""
+    local needs_debate=false
 
     # Calculate confidence if not already done
     if [ ! -f ".loki/state/task-confidence.json" ]; then
@@ -1679,6 +1681,16 @@ route_task_by_confidence() {
 
     log_info "Task confidence: $confidence (tier: $tier)"
 
+    # Check if debate verification is needed for this task
+    if [ "$DEBATE_ENABLED" = "true" ]; then
+        local debate_check
+        debate_check=$(should_trigger_debate "$task_file" 2>/dev/null | head -1)
+        if [ "$debate_check" = "DEBATE_REQUIRED" ]; then
+            needs_debate=true
+            log_info "Debate verification triggered for this task"
+        fi
+    fi
+
     case "$tier" in
         "auto-approve")
             log_info "Auto-approving task (high confidence)"
@@ -1686,15 +1698,27 @@ route_task_by_confidence() {
             ;;
         "direct-review")
             log_info "Executing with post-review (medium-high confidence)"
-            action="execute_with_review"
+            if [ "$needs_debate" = "true" ]; then
+                action="execute_with_debate_review"
+            else
+                action="execute_with_review"
+            fi
             ;;
         "supervisor")
             log_info "Full supervisor orchestration (medium confidence)"
-            action="supervisor_mode"
+            if [ "$needs_debate" = "true" ]; then
+                action="supervisor_with_debate"
+            else
+                action="supervisor_mode"
+            fi
             ;;
         "escalate")
             log_warn "Task escalated - confidence too low"
-            action="escalate"
+            if [ "$needs_debate" = "true" ]; then
+                action="debate_then_escalate"
+            else
+                action="escalate"
+            fi
             ;;
     esac
 
@@ -1703,15 +1727,34 @@ route_task_by_confidence() {
 
 get_routing_recommendation() {
     # Get routing recommendation for a task without executing
+    # Now includes debate verification status
     local task_file="$1"
 
     calculate_task_confidence "$task_file" ".loki/state/task-confidence.json"
+
+    # Check debate status
+    local debate_status="disabled"
+    local debate_reason=""
+    if [ "$DEBATE_ENABLED" = "true" ]; then
+        local debate_check
+        debate_check=$(should_trigger_debate "$task_file" 2>/dev/null)
+        if echo "$debate_check" | grep -q "DEBATE_REQUIRED"; then
+            debate_status="required"
+            debate_reason=$(echo "$debate_check" | grep "REASON:" | cut -d: -f2-)
+        else
+            debate_status="not_needed"
+            debate_reason=$(echo "$debate_check" | grep "REASON:" | cut -d: -f2-)
+        fi
+    fi
 
     python3 << RECOMMEND_SCRIPT
 import json
 
 with open('.loki/state/task-confidence.json', 'r') as f:
     result = json.load(f)
+
+debate_status = "$debate_status"
+debate_reason = "$debate_reason"
 
 tier_descriptions = {
     'auto-approve': 'Execute immediately without review (very high confidence)',
@@ -1720,10 +1763,28 @@ tier_descriptions = {
     'escalate': 'Seek clarification before proceeding (low confidence)'
 }
 
+# Include debate suffix for tiers that may involve debate
+tier_with_debate = {
+    'direct-review': 'execute_with_debate_review',
+    'supervisor': 'supervisor_with_debate',
+    'escalate': 'debate_then_escalate'
+}
+
 print(f"Confidence: {result['confidence']:.1%}")
 print(f"Tier: {result['tier']}")
 print(f"Recommendation: {tier_descriptions[result['tier']]}")
 print()
+
+# Show debate status
+print(f"Debate: {debate_status}")
+if debate_status == "required":
+    print(f"  Reason: {debate_reason}")
+    if result['tier'] in tier_with_debate:
+        print(f"  Action: {tier_with_debate[result['tier']]}")
+elif debate_status == "not_needed":
+    print(f"  Reason: {debate_reason}")
+print()
+
 print("Factor breakdown:")
 for factor, score in result['factors'].items():
     weight = result['weights'][factor]
@@ -2067,6 +2128,252 @@ except Exception as e:
     print("DEBATE_SKIP")
     print(f"REASON:error={str(e)}")
 TRIGGER_SCRIPT
+}
+
+#===============================================================================
+# Dynamic Agent Selection
+# Classifies task complexity and selects optimal model (Haiku/Sonnet/Opus)
+# Based on SKILL.md model selection strategy and 2026 research patterns
+#===============================================================================
+
+classify_task_complexity() {
+    # Classify a task as simple/medium/complex based on multiple factors
+    local task_file="$1"
+    local output_file="${2:-.loki/state/task-complexity.json}"
+
+    if [ ! -f "$task_file" ]; then
+        echo '{"complexity":"medium","model":"sonnet","score":0.5}' > "$output_file"
+        return 0
+    fi
+
+    python3 << CLASSIFY_SCRIPT
+import json
+import re
+from datetime import datetime, timezone
+
+task_file = "$task_file"
+output_file = "$output_file"
+
+with open(task_file, 'r') as f:
+    task = json.load(f)
+
+# Extract task details
+task_type = task.get('type', 'unknown')
+description = str(task.get('payload', {}).get('description', task.get('description', '')))
+action = str(task.get('payload', {}).get('action', ''))
+dependencies = task.get('dependencies', [])
+priority = task.get('priority', 5)
+timeout = task.get('timeout', 3600)
+
+# Complexity factors (each returns 0.0-1.0, higher = more complex)
+factors = {}
+
+# 1. Task type complexity
+simple_types = ['lint', 'format', 'test-unit', 'health-check', 'docs', 'monitor']
+medium_types = ['test-integration', 'test-e2e', 'deploy', 'security-scan', 'review']
+complex_types = ['architecture', 'design', 'implement', 'refactor', 'bootstrap', 'discovery', 'database', 'auth']
+
+type_score = 0.5
+if any(st in task_type.lower() for st in simple_types):
+    type_score = 0.2
+elif any(mt in task_type.lower() for mt in medium_types):
+    type_score = 0.5
+elif any(ct in task_type.lower() for ct in complex_types):
+    type_score = 0.8
+factors['task_type'] = type_score
+
+# 2. Action complexity
+simple_actions = ['run', 'check', 'lint', 'format', 'test', 'read', 'list']
+medium_actions = ['update', 'fix', 'add', 'modify', 'deploy', 'review']
+complex_actions = ['implement', 'design', 'architect', 'refactor', 'create', 'build', 'migrate']
+
+action_score = 0.5
+action_lower = action.lower()
+if any(sa in action_lower for sa in simple_actions):
+    action_score = 0.2
+elif any(ma in action_lower for ma in medium_actions):
+    action_score = 0.5
+elif any(ca in action_lower for ca in complex_actions):
+    action_score = 0.8
+factors['action'] = action_score
+
+# 3. Description complexity
+desc_lower = description.lower()
+
+# Indicators of simple tasks
+simple_indicators = ['single', 'one', 'just', 'only', 'simple', 'quick', 'trivial']
+# Indicators of complex tasks
+complex_indicators = ['multiple', 'several', 'complex', 'architecture', 'design', 'refactor',
+                     'integrate', 'security', 'authentication', 'database', 'migration',
+                     'performance', 'optimize', 'scale']
+
+simple_count = sum(1 for ind in simple_indicators if ind in desc_lower)
+complex_count = sum(1 for ind in complex_indicators if ind in desc_lower)
+
+if complex_count > simple_count:
+    desc_score = min(0.9, 0.5 + complex_count * 0.1)
+elif simple_count > complex_count:
+    desc_score = max(0.1, 0.5 - simple_count * 0.1)
+else:
+    desc_score = 0.5
+
+# Length also indicates complexity
+if len(description) > 200:
+    desc_score = min(1.0, desc_score + 0.1)
+elif len(description) < 50:
+    desc_score = max(0.0, desc_score - 0.1)
+
+factors['description'] = desc_score
+
+# 4. Dependencies (more deps = more complex)
+dep_score = min(1.0, len(dependencies) * 0.2)
+factors['dependencies'] = dep_score
+
+# 5. Timeout (longer timeout often = more complex)
+if timeout > 3600:
+    timeout_score = 0.8
+elif timeout > 1800:
+    timeout_score = 0.6
+elif timeout > 600:
+    timeout_score = 0.4
+else:
+    timeout_score = 0.2
+factors['timeout'] = timeout_score
+
+# Calculate weighted complexity score
+weights = {
+    'task_type': 0.30,
+    'action': 0.25,
+    'description': 0.25,
+    'dependencies': 0.10,
+    'timeout': 0.10
+}
+
+complexity_score = sum(factors[k] * weights[k] for k in factors)
+complexity_score = round(complexity_score, 3)
+
+# Determine complexity level and model
+if complexity_score < 0.35:
+    complexity_level = 'simple'
+    model = 'haiku'
+    sdlc_phase = 'operations'
+elif complexity_score < 0.65:
+    complexity_level = 'medium'
+    model = 'sonnet'
+    sdlc_phase = 'qa-deployment'
+else:
+    complexity_level = 'complex'
+    model = 'opus'
+    sdlc_phase = 'development'
+
+result = {
+    'taskId': task.get('id', 'unknown'),
+    'taskType': task_type,
+    'complexity': complexity_level,
+    'model': model,
+    'score': complexity_score,
+    'sdlcPhase': sdlc_phase,
+    'factors': {k: round(v, 3) for k, v in factors.items()},
+    'weights': weights,
+    'calculatedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+}
+
+with open(output_file, 'w') as f:
+    json.dump(result, f, indent=2)
+
+print(f"COMPLEXITY:{complexity_level}")
+print(f"MODEL:{model}")
+print(f"SCORE:{complexity_score}")
+CLASSIFY_SCRIPT
+}
+
+select_model_for_task() {
+    # Select the optimal model for a task based on complexity classification
+    local task_file="$1"
+    local complexity_file=".loki/state/task-complexity.json"
+
+    # Classify if not already done
+    if [ ! -f "$complexity_file" ]; then
+        classify_task_complexity "$task_file" "$complexity_file"
+    fi
+
+    local model=$(python3 -c "import json; print(json.load(open('$complexity_file'))['model'])")
+    echo "$model"
+}
+
+get_agent_recommendation() {
+    # Get a human-readable recommendation for agent selection
+    local task_file="$1"
+
+    classify_task_complexity "$task_file" ".loki/state/task-complexity.json"
+
+    python3 << RECOMMEND_AGENT
+import json
+
+with open('.loki/state/task-complexity.json', 'r') as f:
+    result = json.load(f)
+
+model_descriptions = {
+    'haiku': 'Fast parallel execution (unit tests, linting, monitoring)',
+    'sonnet': 'QA and deployment (integration tests, security scans, deploys)',
+    'opus': 'Complex development (architecture, implementation, refactoring)'
+}
+
+sdlc_phases = {
+    'operations': 'Haiku handles: unit tests, docs, bash, linting, monitoring',
+    'qa-deployment': 'Sonnet handles: E2E tests, security, performance, deployment',
+    'development': 'Opus handles: bootstrap, discovery, architecture, development'
+}
+
+print(f"Task: {result.get('taskId', 'unknown')}")
+print(f"Type: {result.get('taskType', 'unknown')}")
+print(f"Complexity: {result['complexity']} ({result['score']:.0%})")
+print(f"Recommended Model: {result['model'].upper()}")
+print(f"Reason: {model_descriptions[result['model']]}")
+print(f"SDLC Phase: {sdlc_phases[result['sdlcPhase']]}")
+print()
+print("Factor breakdown:")
+for factor, score in result['factors'].items():
+    weight = result['weights'][factor]
+    contribution = score * weight
+    print(f"  {factor}: {score:.1%} (weight: {weight:.0%}, contribution: {contribution:.3f})")
+RECOMMEND_AGENT
+}
+
+get_parallel_agent_count() {
+    # Determine how many parallel agents to spawn based on task complexity
+    local task_file="$1"
+    local max_parallel="${LOKI_MAX_PARALLEL_AGENTS:-10}"
+    local complexity_file=".loki/state/task-complexity.json"
+
+    # Classify if not already done
+    if [ ! -f "$complexity_file" ]; then
+        classify_task_complexity "$task_file" "$complexity_file"
+    fi
+
+    python3 << PARALLEL_COUNT
+import json
+
+with open('.loki/state/task-complexity.json', 'r') as f:
+    result = json.load(f)
+
+max_parallel = int("$max_parallel")
+complexity = result.get('complexity', 'medium')
+model = result.get('model', 'sonnet')
+
+# Haiku tasks can run in large parallel batches
+# Sonnet tasks should be more limited
+# Opus tasks should be sequential or small batches
+if model == 'haiku':
+    recommended = max_parallel  # Full parallelization
+elif model == 'sonnet':
+    recommended = min(5, max_parallel)  # Limited parallelization
+else:  # opus
+    recommended = min(2, max_parallel)  # Minimal parallelization
+
+print(f"PARALLEL_COUNT:{recommended}")
+print(f"MODEL:{model}")
+PARALLEL_COUNT
 }
 
 start_dashboard() {

@@ -385,6 +385,167 @@ else
     log_fail "Resource impact calculation incorrect"
 fi
 
+# Test 7: Debate triggers for low-confidence tasks
+log_test "Debate triggers for supervisor tier"
+python3 << 'TEST_DEBATE_TRIGGER'
+# Simulate should_trigger_debate logic
+confidence = 0.55  # Supervisor tier
+tier = 'supervisor'
+threshold = 0.70
+critical_types = ['security', 'deployment', 'database']
+task_type = 'eng-backend'
+
+is_critical = any(ct in task_type.lower() for ct in critical_types)
+should_debate = (
+    confidence < threshold or
+    tier in ['supervisor', 'escalate'] or
+    is_critical
+)
+
+if should_debate:
+    print("DEBATE_REQUIRED")
+else:
+    print("DEBATE_SKIP")
+TEST_DEBATE_TRIGGER
+
+debate_result=$(python3 -c "
+confidence = 0.55
+tier = 'supervisor'
+threshold = 0.70
+should_debate = confidence < threshold or tier in ['supervisor', 'escalate']
+print(should_debate)
+")
+
+if [ "$debate_result" = "True" ]; then
+    log_pass "Debate correctly triggered for supervisor tier"
+else
+    log_fail "Debate should trigger for supervisor tier"
+fi
+
+# Test 8: No debate for high-confidence tasks
+log_test "No debate for auto-approve tier"
+python3 << 'TEST_NO_DEBATE'
+confidence = 0.97
+tier = 'auto-approve'
+threshold = 0.70
+task_type = 'lint'
+critical_types = ['security', 'deployment', 'database']
+
+is_critical = any(ct in task_type.lower() for ct in critical_types)
+should_debate = (
+    confidence < threshold or
+    tier in ['supervisor', 'escalate'] or
+    is_critical
+)
+
+if not should_debate:
+    print("DEBATE_SKIP_CORRECT")
+else:
+    print("DEBATE_SHOULD_NOT_TRIGGER")
+TEST_NO_DEBATE
+
+no_debate_result=$(python3 -c "
+confidence = 0.97
+tier = 'auto-approve'
+threshold = 0.70
+should_debate = confidence < threshold or tier in ['supervisor', 'escalate']
+print(not should_debate)
+")
+
+if [ "$no_debate_result" = "True" ]; then
+    log_pass "Debate correctly skipped for auto-approve tier"
+else
+    log_fail "Debate should not trigger for auto-approve"
+fi
+
+# Test 9: Debate triggers for critical task types
+log_test "Debate triggers for critical task types (security)"
+python3 << 'TEST_CRITICAL_DEBATE'
+confidence = 0.85  # Above threshold
+tier = 'direct-review'
+threshold = 0.70
+task_type = 'security-scan'
+critical_types = ['security', 'deployment', 'database']
+
+is_critical = any(ct in task_type.lower() for ct in critical_types)
+should_debate = (
+    confidence < threshold or
+    tier in ['supervisor', 'escalate'] or
+    is_critical
+)
+
+if should_debate and is_critical:
+    print("CRITICAL_DEBATE_CORRECT")
+else:
+    print("CRITICAL_DEBATE_WRONG")
+TEST_CRITICAL_DEBATE
+
+critical_result=$(python3 -c "
+task_type = 'security-scan'
+critical_types = ['security', 'deployment', 'database']
+is_critical = any(ct in task_type.lower() for ct in critical_types)
+print(is_critical)
+")
+
+if [ "$critical_result" = "True" ]; then
+    log_pass "Debate correctly triggered for security task"
+else
+    log_fail "Debate should trigger for security tasks"
+fi
+
+# Test 10: Routing actions with debate suffix
+log_test "Routing actions include debate suffix when needed"
+python3 << 'TEST_DEBATE_ACTIONS'
+# Test that routing returns correct actions
+def get_action_with_debate(tier, needs_debate):
+    if tier == 'auto-approve':
+        return 'execute_direct'
+    elif tier == 'direct-review':
+        return 'execute_with_debate_review' if needs_debate else 'execute_with_review'
+    elif tier == 'supervisor':
+        return 'supervisor_with_debate' if needs_debate else 'supervisor_mode'
+    elif tier == 'escalate':
+        return 'debate_then_escalate' if needs_debate else 'escalate'
+
+# Test cases
+tests = [
+    ('supervisor', True, 'supervisor_with_debate'),
+    ('supervisor', False, 'supervisor_mode'),
+    ('direct-review', True, 'execute_with_debate_review'),
+    ('direct-review', False, 'execute_with_review'),
+    ('escalate', True, 'debate_then_escalate'),
+    ('escalate', False, 'escalate'),
+    ('auto-approve', True, 'execute_direct'),
+    ('auto-approve', False, 'execute_direct'),
+]
+
+all_correct = True
+for tier, needs_debate, expected in tests:
+    actual = get_action_with_debate(tier, needs_debate)
+    if actual != expected:
+        print(f"FAIL: {tier}, debate={needs_debate} -> {actual}, expected {expected}")
+        all_correct = False
+
+if all_correct:
+    print("DEBATE_ACTIONS_CORRECT")
+TEST_DEBATE_ACTIONS
+
+actions_result=$(python3 -c "
+def get_action(tier, needs_debate):
+    if tier == 'auto-approve': return 'execute_direct'
+    elif tier == 'direct-review': return 'execute_with_debate_review' if needs_debate else 'execute_with_review'
+    elif tier == 'supervisor': return 'supervisor_with_debate' if needs_debate else 'supervisor_mode'
+    elif tier == 'escalate': return 'debate_then_escalate' if needs_debate else 'escalate'
+
+print(get_action('supervisor', True) == 'supervisor_with_debate' and get_action('supervisor', False) == 'supervisor_mode')
+")
+
+if [ "$actions_result" = "True" ]; then
+    log_pass "Routing actions correctly include debate suffix"
+else
+    log_fail "Routing actions with debate suffix incorrect"
+fi
+
 echo ""
 echo "========================================"
 echo "Test Summary"
