@@ -54,6 +54,8 @@ run_test "Circuit Breaker Tests" "$SCRIPT_DIR/test-circuit-breaker.sh"
 run_test "Timeout & Stuck Process Tests" "$SCRIPT_DIR/test-agent-timeout.sh"
 run_test "State Recovery Tests" "$SCRIPT_DIR/test-state-recovery.sh"
 run_test "Wrapper Script Tests" "$SCRIPT_DIR/test-wrapper.sh"
+run_test "Review-to-Memory Learning Tests" "$SCRIPT_DIR/test-review-to-memory.sh"
+run_test "Rules Integration Tests" "$SCRIPT_DIR/test-rules-integration.sh"
 
 # Summary
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"

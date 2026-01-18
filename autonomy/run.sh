@@ -1306,6 +1306,183 @@ print("Learning extraction complete")
 EXTRACT_SCRIPT
 }
 
+extract_anti_patterns_from_review() {
+    # Extract anti-patterns from code review findings (Review-to-Memory Learning)
+    # Called after every code review cycle to prevent repeat mistakes
+    local review_file="${1:-.loki/logs/latest-review.json}"
+    local anti_patterns_dir=".loki/memory/semantic/anti-patterns"
+
+    mkdir -p "$anti_patterns_dir"
+
+    if [ ! -f "$review_file" ]; then
+        log_info "No review file found at $review_file"
+        return 0
+    fi
+
+    log_info "Extracting anti-patterns from code review..."
+
+    python3 << ANTIPATTERN_SCRIPT
+import json
+import os
+from datetime import datetime, timezone
+
+review_file = "$review_file"
+anti_patterns_dir = "$anti_patterns_dir"
+
+if not os.path.exists(review_file):
+    exit(0)
+
+try:
+    with open(review_file, 'r') as f:
+        review = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    print("Could not parse review file")
+    exit(0)
+
+# Extract findings from review (expecting format: {findings: [{severity, category, description, file, line}]})
+findings = review.get('findings', [])
+if isinstance(review, list):
+    findings = review
+
+extracted = 0
+for finding in findings:
+    severity = finding.get('severity', 'medium').lower()
+
+    # Only extract Critical, High, or Medium severity findings
+    if severity not in ['critical', 'high', 'medium']:
+        continue
+
+    category = finding.get('category', 'general')
+    description = finding.get('description', finding.get('message', ''))
+    file_path = finding.get('file', '')
+    prevention = finding.get('prevention', finding.get('fix', 'Follow best practices'))
+
+    if not description:
+        continue
+
+    # Generate anti-pattern ID
+    pattern_id = f"{category}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+    anti_pattern = {
+        "id": pattern_id,
+        "pattern": description,
+        "category": category,
+        "severity": severity,
+        "prevention": prevention,
+        "source": f"review-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+        "file": file_path,
+        "confidence": 0.9 if severity == 'critical' else 0.7 if severity == 'high' else 0.5,
+        "created": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    }
+
+    # Save to category-specific file
+    category_file = os.path.join(anti_patterns_dir, f"{category}.jsonl")
+    with open(category_file, 'a') as f:
+        f.write(json.dumps(anti_pattern) + "\\n")
+
+    extracted += 1
+    print(f"Extracted: [{severity}] {description[:60]}...")
+
+# Also save to global anti-patterns index
+if extracted > 0:
+    index_file = os.path.join(anti_patterns_dir, "INDEX.json")
+    index = {"lastUpdated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "count": 0}
+    if os.path.exists(index_file):
+        try:
+            with open(index_file, 'r') as f:
+                index = json.load(f)
+        except:
+            pass
+    index["count"] = index.get("count", 0) + extracted
+    index["lastUpdated"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with open(index_file, 'w') as f:
+        json.dump(index, f, indent=2)
+
+print(f"Extracted {extracted} anti-patterns to {anti_patterns_dir}")
+ANTIPATTERN_SCRIPT
+}
+
+query_anti_patterns() {
+    # Query anti-patterns before implementation to avoid repeat mistakes
+    local context="$1"
+    local anti_patterns_dir=".loki/memory/semantic/anti-patterns"
+    local output_file=".loki/state/relevant-anti-patterns.json"
+
+    if [ ! -d "$anti_patterns_dir" ]; then
+        echo '{"antiPatterns":[]}' > "$output_file"
+        return 0
+    fi
+
+    python3 << QUERY_SCRIPT
+import json
+import os
+import glob
+
+anti_patterns_dir = "$anti_patterns_dir"
+context = """$context""".lower()
+output_file = "$output_file"
+
+def load_jsonl(filepath):
+    entries = []
+    if not os.path.exists(filepath):
+        return entries
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('{'):
+                continue
+            try:
+                entries.append(json.loads(line))
+            except:
+                pass
+    return entries
+
+# Load all anti-patterns from all category files
+all_patterns = []
+for jsonl_file in glob.glob(f"{anti_patterns_dir}/*.jsonl"):
+    all_patterns.extend(load_jsonl(jsonl_file))
+
+# Score patterns by relevance to context
+def score_pattern(pattern):
+    desc = pattern.get('pattern', '').lower()
+    cat = pattern.get('category', '').lower()
+    prevention = pattern.get('prevention', '').lower()
+
+    score = 0
+    for word in context.split():
+        if len(word) > 3:  # Skip short words
+            if word in desc:
+                score += 3
+            if word in cat:
+                score += 2
+            if word in prevention:
+                score += 1
+
+    # Boost by severity
+    severity = pattern.get('severity', 'low')
+    if severity == 'critical':
+        score *= 2
+    elif severity == 'high':
+        score *= 1.5
+
+    return score
+
+# Filter and sort by relevance
+scored = [(score_pattern(p), p) for p in all_patterns]
+scored.sort(reverse=True, key=lambda x: x[0])
+relevant = [p for score, p in scored if score > 0][:10]
+
+result = {"antiPatterns": relevant, "count": len(relevant)}
+with open(output_file, 'w') as f:
+    json.dump(result, f, indent=2)
+
+if relevant:
+    print(f"Found {len(relevant)} relevant anti-patterns")
+else:
+    print("No relevant anti-patterns found")
+QUERY_SCRIPT
+}
+
 start_dashboard() {
     log_header "Starting Loki Dashboard"
 
