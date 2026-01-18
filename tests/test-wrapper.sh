@@ -89,14 +89,14 @@ fi
 log_test "State file JSON structure"
 python3 << 'EOF'
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Simulate wrapper state
 state = {
     "retryCount": 3,
     "status": "running",
     "lastExitCode": 0,
-    "lastRun": datetime.utcnow().isoformat() + 'Z',
+    "lastRun": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     "prdPath": "./docs/requirements.md",
     "pid": 12345
 }

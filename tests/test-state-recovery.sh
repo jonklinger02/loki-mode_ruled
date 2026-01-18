@@ -85,12 +85,12 @@ fi
 log_test "Update lastCheckpoint timestamp"
 python3 << EOF
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 with open('.loki/state/orchestrator.json', 'r') as f:
     state = json.load(f)
 
-state['lastCheckpoint'] = datetime.utcnow().isoformat() + 'Z'
+state['lastCheckpoint'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 with open('.loki/state/orchestrator.json', 'w') as f:
     json.dump(state, f, indent=2)
@@ -183,7 +183,7 @@ fi
 log_test "Detect orphaned tasks"
 python3 << 'EOF'
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 CLAIM_TIMEOUT = 3600  # 1 hour
 
@@ -192,7 +192,7 @@ old_task = {
     "id": "task-old-001",
     "type": "eng-backend",
     "claimedBy": "dead-agent-99",
-    "claimedAt": (datetime.utcnow() - timedelta(hours=2)).isoformat() + 'Z'
+    "claimedAt": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat().replace('+00:00', 'Z')
 }
 
 with open('.loki/queue/in-progress.json', 'r') as f:
@@ -205,7 +205,7 @@ with open('.loki/queue/in-progress.json', 'w') as f:
 
 def find_orphaned_tasks(in_progress_tasks):
     orphaned = []
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     for task in in_progress_tasks:
         if task.get('claimedAt'):
@@ -228,7 +228,7 @@ log_pass "Orphaned task detection works"
 log_test "Re-queue orphaned tasks"
 python3 << 'EOF'
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 CLAIM_TIMEOUT = 3600
 
@@ -238,7 +238,7 @@ with open('.loki/queue/in-progress.json', 'r') as f:
 with open('.loki/queue/pending.json', 'r') as f:
     pending = json.load(f)
 
-now = datetime.utcnow()
+now = datetime.now(timezone.utc)
 requeued = []
 
 for task in in_progress['tasks'][:]:
@@ -250,7 +250,7 @@ for task in in_progress['tasks'][:]:
             # Re-queue: clear claim and move to pending
             task['claimedBy'] = None
             task['claimedAt'] = None
-            task['requeuedAt'] = now.isoformat() + 'Z'
+            task['requeuedAt'] = now.isoformat().replace('+00:00', 'Z')
             task['requeueReason'] = 'claim_timeout'
 
             pending['tasks'].append(task)
@@ -304,7 +304,7 @@ python3 << 'EOF'
 import json
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 def recover_system():
     """Full system recovery procedure"""

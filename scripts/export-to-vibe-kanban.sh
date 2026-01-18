@@ -55,7 +55,7 @@ export_queue() {
     python3 << EOF
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 def get_payload_title(payload):
     """Extract title from payload, handling both dict and string types."""
@@ -140,7 +140,7 @@ for task in tasks:
             "lokiPriority": priority,
             "lokiPhase": "$CURRENT_PHASE",
             "lokiRetries": task.get('retries', 0),
-            "createdAt": task.get('createdAt', datetime.utcnow().isoformat() + 'Z'),
+            "createdAt": task.get('createdAt', datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')),
             "claimedBy": task.get('claimedBy'),
             "lastError": task.get('lastError')
         }

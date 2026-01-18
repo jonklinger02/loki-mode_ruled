@@ -61,7 +61,7 @@ EOF
 log_test "Initialize circuit breaker in CLOSED state"
 python3 << 'EOF'
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 with open('.loki/state/orchestrator.json', 'r') as f:
     state = json.load(f)
@@ -97,7 +97,7 @@ fi
 log_test "Record failures incrementally"
 python3 << 'EOF'
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 with open('.loki/state/orchestrator.json', 'r') as f:
     state = json.load(f)
@@ -107,7 +107,7 @@ cb = state['circuitBreakers']['eng-backend']
 # Record 3 failures
 for i in range(3):
     cb['failures'] += 1
-    cb['lastFailure'] = datetime.utcnow().isoformat() + 'Z'
+    cb['lastFailure'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 with open('.loki/state/orchestrator.json', 'w') as f:
     json.dump(state, f, indent=2)
@@ -131,7 +131,7 @@ fi
 log_test "Trip circuit breaker after threshold"
 python3 << 'EOF'
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 FAILURE_THRESHOLD = 5
 COOLDOWN_SECONDS = 300
@@ -143,12 +143,12 @@ cb = state['circuitBreakers']['eng-backend']
 
 # Add 2 more failures to reach threshold
 cb['failures'] += 2
-cb['lastFailure'] = datetime.utcnow().isoformat() + 'Z'
+cb['lastFailure'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 # Check if threshold reached
 if cb['failures'] >= FAILURE_THRESHOLD:
     cb['state'] = 'open'
-    cb['cooldownUntil'] = (datetime.utcnow() + timedelta(seconds=COOLDOWN_SECONDS)).isoformat() + 'Z'
+    cb['cooldownUntil'] = (datetime.now(timezone.utc) + timedelta(seconds=COOLDOWN_SECONDS)).isoformat().replace('+00:00', 'Z')
     print(f"TRIPPED:open")
 else:
     print(f"NOT_TRIPPED:{cb['failures']}")
@@ -173,7 +173,7 @@ fi
 log_test "Block requests when circuit is OPEN"
 python3 << 'EOF'
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 with open('.loki/state/orchestrator.json', 'r') as f:
     state = json.load(f)
@@ -205,7 +205,7 @@ log_pass "Requests blocked when circuit is OPEN"
 log_test "Transition to HALF-OPEN after cooldown"
 python3 << 'EOF'
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 with open('.loki/state/orchestrator.json', 'r') as f:
     state = json.load(f)
@@ -213,7 +213,7 @@ with open('.loki/state/orchestrator.json', 'r') as f:
 cb = state['circuitBreakers']['eng-backend']
 
 # Simulate cooldown expired
-cb['cooldownUntil'] = (datetime.utcnow() - timedelta(seconds=10)).isoformat() + 'Z'
+cb['cooldownUntil'] = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat().replace('+00:00', 'Z')
 
 # Check and transition
 cooldown_time = datetime.fromisoformat(cb['cooldownUntil'].replace('Z', '+00:00'))
@@ -283,7 +283,7 @@ fi
 log_test "Failure in HALF-OPEN transitions back to OPEN"
 python3 << 'EOF'
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 COOLDOWN_SECONDS = 300
 
@@ -299,8 +299,8 @@ cb['halfOpenAttempts'] = 1
 # Simulate failure
 cb['state'] = 'open'
 cb['failures'] += 1
-cb['lastFailure'] = datetime.utcnow().isoformat() + 'Z'
-cb['cooldownUntil'] = (datetime.utcnow() + timedelta(seconds=COOLDOWN_SECONDS)).isoformat() + 'Z'
+cb['lastFailure'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+cb['cooldownUntil'] = (datetime.now(timezone.utc) + timedelta(seconds=COOLDOWN_SECONDS)).isoformat().replace('+00:00', 'Z')
 cb['halfOpenAttempts'] = 0
 
 print("REOPENED")
