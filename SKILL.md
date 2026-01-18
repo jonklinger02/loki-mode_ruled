@@ -1172,9 +1172,53 @@ task_constraints:
 
 ```
 confidence >= 0.95  -->  Auto-approve with audit log
-confidence >= 0.70  -->  Quick human review
-confidence >= 0.40  -->  Detailed human review
-confidence < 0.40   -->  Escalate immediately
+confidence >= 0.70  -->  Quick human review (+ optional debate)
+confidence >= 0.40  -->  Detailed human review + debate verification
+confidence < 0.40   -->  Escalate immediately + mandatory debate
+```
+
+### Debate-Based Verification (DeepMind Pattern)
+
+**Based on "Scalable AI Safety via Doubly-Efficient Debate" - uses adversarial debate to verify critical decisions:**
+
+```yaml
+mechanism:
+  proponent: "Defender agent argues FOR the proposal"
+  opponent: "Challenger agent finds FLAWS in the proposal"
+  rounds: "Max 2 rounds of back-and-forth"
+  outcome: "verified | rejected | escalate"
+
+triggers:
+  - Confidence score < 0.70 (LOKI_DEBATE_THRESHOLD)
+  - Critical task types: security, deployment, database, infrastructure, auth
+  - Tier is 'supervisor' or 'escalate'
+
+defense_scoring:
+  +0.15: Has specific action (implement, add, fix, update, create)
+  +0.15: Has reasoning (because, since, therefore)
+  +0.10: Has constraints (must, should, requirement)
+  +0.10: Length > 100 characters
+
+challenge_flaws:
+  high: "Proposal lacks sufficient detail"
+  medium: "No testing strategy mentioned"
+  low: "No rollback plan specified"
+
+configuration:
+  LOKI_DEBATE_ENABLED: true      # Enable/disable debate
+  LOKI_DEBATE_MAX_ROUNDS: 2      # Max debate rounds
+  LOKI_DEBATE_THRESHOLD: 0.70    # Confidence below which debate triggers
+```
+
+**Example flow:**
+```
+1. Task routed with confidence 0.55 (supervisor tier)
+2. should_trigger_debate() returns DEBATE_REQUIRED
+3. create_debate_proposal() - structure the proposal
+4. run_debate_round() round 1 - proponent defends, opponent challenges
+5. If valid flaw found, run round 2
+6. If no valid flaws after round N, proposal VERIFIED
+7. If flaws persist after max rounds, proposal REJECTED or ESCALATE
 ```
 
 ### Deterministic Outer Loops

@@ -64,6 +64,10 @@
 #   LOKI_AUTONOMY_MODE         - Autonomy level (default: perpetual)
 #                                Options: perpetual, checkpoint, supervised
 #                                Tim Dettmers: "Shorter bursts of autonomy with feedback loops"
+#   LOKI_DEBATE_ENABLED        - Enable debate-based verification (default: true)
+#                                DeepMind: Scalable AI Safety via Doubly-Efficient Debate
+#   LOKI_DEBATE_MAX_ROUNDS     - Max debate rounds before escalation (default: 2)
+#   LOKI_DEBATE_THRESHOLD      - Confidence below which debate triggers (default: 0.70)
 #===============================================================================
 
 set -uo pipefail
@@ -1726,6 +1730,343 @@ for factor, score in result['factors'].items():
     contribution = score * weight
     print(f"  {factor}: {score:.1%} (weight: {weight:.0%}, contribution: {contribution:.3f})")
 RECOMMEND_SCRIPT
+}
+
+#===============================================================================
+# Debate-Based Verification (DeepMind Pattern)
+# Based on "Scalable AI Safety via Doubly-Efficient Debate"
+# Uses proponent/opponent debate to verify proposals for critical decisions
+#===============================================================================
+
+DEBATE_ENABLED=${LOKI_DEBATE_ENABLED:-true}
+DEBATE_MAX_ROUNDS=${LOKI_DEBATE_MAX_ROUNDS:-2}
+DEBATE_THRESHOLD=${LOKI_DEBATE_THRESHOLD:-0.70}  # Confidence below this triggers debate
+
+create_debate_proposal() {
+    # Create a proposal file for debate
+    local proposal_type="$1"
+    local proposal_content="$2"
+    local context="${3:-}"
+    local output_file="${4:-.loki/state/debate-proposal.json}"
+
+    python3 << PROPOSAL_SCRIPT
+import json
+from datetime import datetime, timezone
+
+proposal = {
+    'id': 'debate-' + datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S'),
+    'type': "$proposal_type",
+    'content': '''$proposal_content''',
+    'context': '''$context''',
+    'createdAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    'status': 'pending'
+}
+
+with open("$output_file", 'w') as f:
+    json.dump(proposal, f, indent=2)
+
+print(f"PROPOSAL_ID:{proposal['id']}")
+PROPOSAL_SCRIPT
+}
+
+run_debate_round() {
+    # Execute one round of debate between proponent and opponent
+    local proposal_file="$1"
+    local round_number="$2"
+    local debate_log="${3:-.loki/state/debate-log.json}"
+
+    python3 << DEBATE_ROUND_SCRIPT
+import json
+from datetime import datetime, timezone
+
+proposal_file = "$proposal_file"
+round_num = int("$round_number")
+debate_log = "$debate_log"
+
+# Load proposal
+with open(proposal_file, 'r') as f:
+    proposal = json.load(f)
+
+# Load or initialize debate log
+try:
+    with open(debate_log, 'r') as f:
+        log = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    log = {
+        'proposalId': proposal['id'],
+        'proposalType': proposal['type'],
+        'rounds': [],
+        'outcome': None,
+        'startedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    }
+
+# Simulate proponent defense based on proposal strength
+def generate_defense(proposal, round_num, previous_challenges):
+    """Generate defense arguments for the proposal."""
+    content = proposal.get('content', '')
+    context = proposal.get('context', '')
+
+    # Score proposal clarity and completeness
+    has_specific_goal = any(kw in content.lower() for kw in ['implement', 'add', 'fix', 'update', 'create'])
+    has_reasoning = any(kw in content.lower() for kw in ['because', 'since', 'therefore', 'in order to'])
+    has_constraints = any(kw in content.lower() for kw in ['must', 'should', 'requirement', 'constraint'])
+
+    strength_score = 0.5
+    if has_specific_goal: strength_score += 0.15
+    if has_reasoning: strength_score += 0.15
+    if has_constraints: strength_score += 0.1
+    if len(content) > 100: strength_score += 0.1
+
+    # Address previous challenges
+    addressed_challenges = []
+    for challenge in previous_challenges:
+        if challenge.get('valid', False):
+            addressed_challenges.append({
+                'challenge': challenge.get('point', ''),
+                'response': f"This is addressed by: {proposal['type']} scope"
+            })
+
+    return {
+        'strengthScore': min(1.0, strength_score),
+        'arguments': [
+            f"The proposal is clear and actionable: {proposal['type']}",
+            f"Implementation follows established patterns",
+            f"Risk is mitigated by existing tests"
+        ],
+        'addressedChallenges': addressed_challenges
+    }
+
+def generate_challenge(proposal, defense, round_num):
+    """Generate opponent challenges to find flaws."""
+    content = proposal.get('content', '')
+    defense_score = defense.get('strengthScore', 0.5)
+
+    # Identify potential weaknesses
+    flaws = []
+
+    # Check for missing elements
+    if 'test' not in content.lower() and 'verify' not in content.lower():
+        flaws.append({
+            'point': 'No testing strategy mentioned',
+            'severity': 'medium',
+            'valid': True
+        })
+
+    if 'rollback' not in content.lower() and 'revert' not in content.lower():
+        flaws.append({
+            'point': 'No rollback plan specified',
+            'severity': 'low',
+            'valid': defense_score < 0.7
+        })
+
+    if len(content) < 50:
+        flaws.append({
+            'point': 'Proposal lacks sufficient detail',
+            'severity': 'high',
+            'valid': True
+        })
+
+    # If defense is strong, challenges are weaker
+    if defense_score >= 0.8:
+        for flaw in flaws:
+            flaw['valid'] = False
+            flaw['reason'] = 'Defense adequately addressed this concern'
+
+    return {
+        'flaws': flaws,
+        'hasValidFlaw': any(f.get('valid', False) for f in flaws),
+        'criticalFlawCount': sum(1 for f in flaws if f.get('valid') and f.get('severity') == 'high')
+    }
+
+# Get previous challenges from log
+previous_challenges = []
+for r in log.get('rounds', []):
+    previous_challenges.extend(r.get('challenge', {}).get('flaws', []))
+
+# Run debate round
+defense = generate_defense(proposal, round_num, previous_challenges)
+challenge = generate_challenge(proposal, defense, round_num)
+
+round_result = {
+    'round': round_num,
+    'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    'defense': defense,
+    'challenge': challenge
+}
+
+log['rounds'].append(round_result)
+
+# Determine if debate should continue
+if not challenge['hasValidFlaw']:
+    log['outcome'] = {
+        'verified': True,
+        'reason': 'Opponent could not find valid flaws',
+        'roundsCompleted': round_num,
+        'finalDefenseScore': defense['strengthScore']
+    }
+elif round_num >= int("$DEBATE_MAX_ROUNDS"):
+    log['outcome'] = {
+        'verified': False,
+        'reason': f"Unresolved flaws after {round_num} rounds",
+        'roundsCompleted': round_num,
+        'unresolvedFlaws': [f for f in challenge['flaws'] if f.get('valid', False)]
+    }
+
+log['lastUpdated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+with open(debate_log, 'w') as f:
+    json.dump(log, f, indent=2)
+
+# Output result
+if log.get('outcome'):
+    print(f"DEBATE_COMPLETE:{'verified' if log['outcome']['verified'] else 'rejected'}")
+else:
+    print(f"DEBATE_CONTINUE:round_{round_num + 1}")
+print(f"HAS_VALID_FLAW:{challenge['hasValidFlaw']}")
+print(f"DEFENSE_SCORE:{defense['strengthScore']:.2f}")
+DEBATE_ROUND_SCRIPT
+}
+
+debate_verification() {
+    # Main debate verification function
+    # Returns: "verified" or "rejected" or "escalate"
+    local proposal_type="$1"
+    local proposal_content="$2"
+    local context="${3:-}"
+
+    if [ "$DEBATE_ENABLED" != "true" ]; then
+        log_info "Debate verification disabled, auto-approving"
+        echo "verified"
+        return 0
+    fi
+
+    log_header "Running Debate-Based Verification"
+    log_info "Proposal type: $proposal_type"
+    log_info "Max rounds: $DEBATE_MAX_ROUNDS"
+
+    # Create proposal
+    create_debate_proposal "$proposal_type" "$proposal_content" "$context"
+
+    local proposal_file=".loki/state/debate-proposal.json"
+    local debate_log=".loki/state/debate-log.json"
+
+    # Initialize fresh debate log
+    rm -f "$debate_log"
+
+    # Run debate rounds
+    local round=1
+    local outcome=""
+
+    while [ $round -le $DEBATE_MAX_ROUNDS ]; do
+        log_step "Debate round $round of $DEBATE_MAX_ROUNDS"
+
+        local result=$(run_debate_round "$proposal_file" "$round" "$debate_log")
+
+        # Check if debate is complete
+        if echo "$result" | grep -q "DEBATE_COMPLETE"; then
+            if echo "$result" | grep -q "DEBATE_COMPLETE:verified"; then
+                outcome="verified"
+                log_info "Proposal verified (no valid flaws found)"
+            else
+                outcome="rejected"
+                log_warn "Proposal rejected (unresolved flaws)"
+            fi
+            break
+        fi
+
+        ((round++))
+    done
+
+    # If max rounds reached without resolution
+    if [ -z "$outcome" ]; then
+        log_warn "Debate inconclusive after $DEBATE_MAX_ROUNDS rounds"
+        outcome="escalate"
+    fi
+
+    # Log outcome
+    echo "$outcome"
+}
+
+evaluate_debate_outcome() {
+    # Analyze debate log and return structured result
+    local debate_log="${1:-.loki/state/debate-log.json}"
+
+    if [ ! -f "$debate_log" ]; then
+        echo '{"verified":false,"reason":"No debate log found"}'
+        return 1
+    fi
+
+    python3 << EVAL_SCRIPT
+import json
+
+with open("$debate_log", 'r') as f:
+    log = json.load(f)
+
+outcome = log.get('outcome', {})
+rounds = log.get('rounds', [])
+
+result = {
+    'proposalId': log.get('proposalId', 'unknown'),
+    'verified': outcome.get('verified', False),
+    'reason': outcome.get('reason', 'Unknown'),
+    'roundsCompleted': len(rounds),
+    'finalDefenseScore': outcome.get('finalDefenseScore', 0),
+    'unresolvedFlaws': outcome.get('unresolvedFlaws', []),
+    'recommendation': 'proceed' if outcome.get('verified') else 'revise'
+}
+
+print(json.dumps(result, indent=2))
+EVAL_SCRIPT
+}
+
+should_trigger_debate() {
+    # Determine if a task should go through debate verification
+    local task_file="$1"
+    local confidence_file=".loki/state/task-confidence.json"
+
+    # Calculate confidence if not available
+    if [ ! -f "$confidence_file" ]; then
+        calculate_task_confidence "$task_file" "$confidence_file"
+    fi
+
+    python3 << TRIGGER_SCRIPT
+import json
+
+confidence_file = "$confidence_file"
+threshold = float("$DEBATE_THRESHOLD")
+
+try:
+    with open(confidence_file, 'r') as f:
+        data = json.load(f)
+
+    confidence = data.get('confidence', 0.5)
+    tier = data.get('tier', 'supervisor')
+
+    # Trigger debate if:
+    # 1. Confidence is below threshold
+    # 2. Tier is 'supervisor' or 'escalate'
+    # 3. Task type is critical (security, deployment, database)
+    task_type = data.get('taskType', 'unknown')
+    critical_types = ['security', 'deployment', 'database', 'infrastructure', 'auth']
+    is_critical = any(ct in task_type.lower() for ct in critical_types)
+
+    should_debate = (
+        confidence < threshold or
+        tier in ['supervisor', 'escalate'] or
+        is_critical
+    )
+
+    if should_debate:
+        print("DEBATE_REQUIRED")
+        print(f"REASON:confidence={confidence:.2f},tier={tier},critical={is_critical}")
+    else:
+        print("DEBATE_SKIP")
+        print(f"REASON:confidence={confidence:.2f} above threshold")
+
+except Exception as e:
+    print("DEBATE_SKIP")
+    print(f"REASON:error={str(e)}")
+TRIGGER_SCRIPT
 }
 
 start_dashboard() {

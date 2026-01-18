@@ -57,6 +57,7 @@ run_test "Wrapper Script Tests" "$SCRIPT_DIR/test-wrapper.sh"
 run_test "Review-to-Memory Learning Tests" "$SCRIPT_DIR/test-review-to-memory.sh"
 run_test "Rules Integration Tests" "$SCRIPT_DIR/test-rules-integration.sh"
 run_test "Confidence-Based Routing Tests" "$SCRIPT_DIR/test-confidence-routing.sh"
+run_test "Debate-Based Verification Tests" "$SCRIPT_DIR/test-debate-verification.sh"
 
 # Summary
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
