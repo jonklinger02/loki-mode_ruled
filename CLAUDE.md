@@ -61,7 +61,7 @@ LOKI_MAX_WAIT=3600          # Max wait time (1 hour)
 LOKI_DEBATE_ENABLED=true    # Enable debate verification
 LOKI_DEBATE_THRESHOLD=0.70  # Confidence threshold for debate
 
-# Rules integration (v2.37.1+loki_ruled.1)
+# Rules integration (v2.37.1+loki_ruled.2)
 LOKI_RULES=react,firebase   # Comma-separated rules to load (optional)
 LOKI_INTERACTIVE_RULES=true # Enable interactive rule selection prompt
 ```
@@ -125,7 +125,7 @@ Every iteration follows: **R**eason -> **A**ct -> **R**eflect -> **V**erify
 - Update CHANGELOG.md with new version entry
 
 ### Version Numbering
-Current: v2.37.1+loki_ruled.1
+Current: v2.37.1+loki_ruled.2
 
 ### Code Style
 - No emojis in code or documentation

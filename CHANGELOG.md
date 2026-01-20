@@ -5,6 +5,40 @@ All notable changes to Loki Mode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.1+loki_ruled.2] - 2026-01-20
+
+### Added - Definition of Done Exit Behavior
+
+**System now exits when Definition of Done is achieved instead of running indefinitely.**
+
+#### Problem Solved
+- Previously, the skill entered a continuous "growth loop" and never truly exited
+- The state machine had `growth_loop: success -> growth_loop` creating an infinite loop
+- No mechanism to check PRD acceptance criteria for completion
+
+#### Changes
+- **State Machine**: Added `completed` terminal state; `growth_loop` now transitions to `completed` when DoD met
+- **Core Autonomy Rules**:
+  - Rule 3 changed from "NEVER stop voluntarily" to "STOP when Definition of Done is met"
+  - Added Rule 8: "NO GOLD-PLATING" - stop immediately once done
+- **Decision Tree**: Added DoD check at start and after each phase completion
+- **RARV Cycle**: REFLECT phase now includes explicit DoD check
+- **Exit Conditions**: New "Definition of Done (Primary Exit)" section with verification workflow
+
+#### Definition of Done Criteria
+1. All Acceptance Criteria in the PRD are met
+2. The code builds without errors
+3. All new and existing tests pass
+4. No linter errors remain
+5. Code follows the patterns defined in rule files
+
+#### Expected Behavior
+- After QA phase, system checks all PRD acceptance criteria
+- When all criteria met + quality checks pass: outputs "TASK COMPLETED" and halts
+- No further refactoring, optimization, or gold-plating after completion
+
+---
+
 ## [2.37.1+loki_ruled.1] - 2026-01-18
 
 ### Added - Global Rules Integration

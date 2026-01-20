@@ -5,7 +5,7 @@ description: Multi-agent autonomous startup system for Claude Code. Triggers on 
 
 # Loki Mode - Multi-Agent Autonomous Startup System
 
-> **Version 2.37.1+loki_ruled.1** | PRD to Production | Zero Human Intervention
+> **Version 2.37.1+loki_ruled.2** | PRD to Production | Zero Human Intervention
 > Research-enhanced: OpenAI SDK, DeepMind, Anthropic, AWS Bedrock, Agent SDK, HN Production (2025)
 
 ---
@@ -41,6 +41,10 @@ START
   |
   +-- Read CONTINUITY.md ----------+
   |                                |
+  +-- Definition of Done met?      |
+  |   +-- YES: Output "TASK COMPLETED" -> EXIT
+  |   +-- NO: Continue             |
+  |                                |
   +-- Task in-progress?            |
   |   +-- YES: Resume              |
   |   +-- NO: Check pending queue  |
@@ -50,7 +54,7 @@ START
   |   +-- NO: Check phase completion
   |                                |
   +-- Phase done?                  |
-  |   +-- YES: Advance to next phase
+  |   +-- YES: Check DoD -> if met EXIT, else advance phase
   |   +-- NO: Generate tasks for phase
   |                                |
 LOOP <-----------------------------+
@@ -133,11 +137,12 @@ claude --dangerously-skip-permissions
 
 1. **NEVER ask questions** - No "Would you like me to...", "Should I...", or "What would you prefer?"
 2. **NEVER wait for confirmation** - Take immediate action
-3. **NEVER stop voluntarily** - Continue until completion promise fulfilled
+3. **STOP when Definition of Done is met** - Check PRD acceptance criteria; when ALL are complete, build passes, tests pass, and lint passes: output "TASK COMPLETED" and halt
 4. **NEVER suggest alternatives** - Pick best option and execute
 5. **ALWAYS use RARV cycle** - Every action follows Reason-Act-Reflect-Verify
 6. **NEVER edit `autonomy/run.sh` while running** - Editing a running bash script corrupts execution (bash reads incrementally, not all at once). If you need to fix run.sh, note it in CONTINUITY.md for the next session.
 7. **ONE FEATURE AT A TIME** - Work on exactly one feature per iteration. Complete it, commit it, verify it, then move to the next. Prevents over-commitment and ensures clean progress tracking. (Anthropic Harness Pattern)
+8. **NO GOLD-PLATING** - Once Definition of Done is met, do not refactor, optimize, or add features. Stop immediately.
 
 ### Protected Files (Do Not Edit While Running)
 
@@ -170,7 +175,8 @@ If bugs are found in these files, document them in `.loki/CONTINUITY.md` under "
 | REFLECT: Did it work? What next?                                  |
 | - Verify task success (tests pass, no errors)                     |
 | - UPDATE .loki/CONTINUITY.md with progress                        |
-| - Check completion promise - are we done?                         |
+| - **CHECK Definition of Done** - are ALL PRD criteria met?        |
+| - If DoD met: Output "TASK COMPLETED" and STOP                    |
 +-------------------------------------------------------------------+
 | VERIFY: Let AI test its own work (2-3x quality improvement)       |
 | - Run automated tests (unit, integration, E2E)                    |
@@ -510,8 +516,11 @@ phase_state_machine:
       success: growth_loop
       failure: deployment  # Re-deploy with fixes
     growth_loop:
-      success: growth_loop  # Continuous
+      success: completed    # Exit when Definition of Done is met
+      done_check_fail: growth_loop  # Continue if not done yet
       failure: business_ops
+    completed:
+      # Terminal state - project finished
 
   invariants:
     - "Only one active state at a time"
@@ -1493,13 +1502,57 @@ dependency_management:
 
 ## Exit Conditions
 
+### Definition of Done (Primary Exit)
+
+**The system MUST exit when all criteria are met:**
+
+1. **All Acceptance Criteria in the PRD are met** (extracted during Discovery phase)
+2. The code builds without errors
+3. All new and existing tests pass
+4. No linter errors remain
+5. Code follows the patterns defined in rule files
+
+**Verification workflow (run after Development and QA phases):**
+```yaml
+definition_of_done_check:
+  trigger: "After QA phase completes OR after any major milestone"
+
+  steps:
+    1_extract_criteria:
+      source: "PRD file provided at invocation"
+      output: ".loki/specs/acceptance-criteria.md"
+      format: "Checklist of all acceptance criteria from PRD"
+
+    2_verify_each_criterion:
+      for_each: "criterion in acceptance-criteria.md"
+      check: "Is this criterion implemented and tested?"
+      mark: "[x] if complete, [ ] if incomplete"
+
+    3_run_quality_checks:
+      build: "npm run build OR equivalent (0 errors)"
+      test: "npm test OR equivalent (100% pass)"
+      lint: "npm run lint OR equivalent (0 errors)"
+
+    4_evaluate:
+      if_all_complete: "Transition to 'completed' state"
+      if_incomplete: "Continue with remaining tasks"
+```
+
+**When Definition of Done is met:**
+1. Transition orchestrator state to `completed`
+2. Generate final artifact report to `.loki/artifacts/FINAL_REPORT.md`
+3. Output: **"TASK COMPLETED"**
+4. **STOP execution immediately** - do not continue iterating
+5. Do not refactor or optimize further once done
+
+### Other Exit Conditions
+
 | Condition | Action |
 |-----------|--------|
-| Product launched, stable 24h | Enter growth loop mode |
+| **Definition of Done met** | **STOP - Output "TASK COMPLETED"** |
 | Unrecoverable failure | Save state, halt, request human |
-| PRD updated | Diff, create delta tasks, continue |
-| Revenue target hit | Log success, continue optimization |
-| Runway < 30 days | Alert, optimize costs aggressively |
+| PRD updated mid-execution | Diff, create delta tasks, continue |
+| All acceptance criteria checked | Run Definition of Done verification |
 
 ---
 
@@ -1587,4 +1640,4 @@ Detailed documentation is split into reference files for progressive loading:
 
 ---
 
-**Version:** 2.37.1+loki_ruled.1 | **Lines:** ~1350 | **Research-Enhanced: 2026 Patterns (arXiv, HN, Labs, OpenCode, Cursor, Devin, Codex, Kiro, Antigravity, Amazon Q, RLM, Zencoder, Anthropic, OptiMind, k8s-valkey-operator)**
+**Version:** 2.37.1+loki_ruled.2 | **Lines:** ~1350 | **Research-Enhanced: 2026 Patterns (arXiv, HN, Labs, OpenCode, Cursor, Devin, Codex, Kiro, Antigravity, Amazon Q, RLM, Zencoder, Anthropic, OptiMind, k8s-valkey-operator)**
